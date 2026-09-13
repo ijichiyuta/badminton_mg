@@ -7,6 +7,7 @@ import {
   buildSchedule,
   scheduleSummary,
   toTimetable,
+  validateReferees,
   validateSchedule,
 } from '../schedule'
 import type { ScheduleBlock } from '../schedule'
@@ -129,6 +130,38 @@ describe('第1号提供先の規模を再現する', () => {
   })
 })
 
+describe('回帰：ブロック数が少なくても二重割当を起こさない', () => {
+  // 監査で見つけた不具合。単純にコートへ詰めると、
+  // 4チーム1ブロックの6試合が6コートに同時に並び、同じペアが3コートに出ていた。
+  it('4チーム1ブロックを6コートに流しても衝突しない', () => {
+    const s = buildSchedule([block('a', 'A組', 4)], OPTS)
+    expect(validateSchedule(s)).toEqual([])
+    // 同時に流せるのは2試合まで。6試合＝3枠になる。
+    expect(new Set(s.map((m) => m.scheduledAt)).size).toBe(3)
+  })
+
+  it('3チームブロックは同時1試合まで', () => {
+    const s = buildSchedule([block('a', 'A組', 3)], OPTS)
+    expect(validateSchedule(s)).toEqual([])
+    expect(new Set(s.map((m) => m.scheduledAt)).size).toBe(3)
+  })
+
+  it('2ブロックでも衝突しない', () => {
+    const s = buildSchedule([block('a', 'A組', 4), block('b', 'B組', 4)], OPTS)
+    expect(validateSchedule(s)).toEqual([])
+  })
+
+  it('ブロック数・チーム数を変えても常に衝突しない', () => {
+    for (const blockCount of [1, 2, 3, 5, 15]) {
+      for (const teams of [3, 4, 5, 6]) {
+        const bs = Array.from({ length: blockCount }, (_, i) => block(`b${i}`, `B${i}`, teams))
+        const s = buildSchedule(bs, OPTS)
+        expect(validateSchedule(s), `${blockCount}ブロック×${teams}チーム`).toEqual([])
+      }
+    }
+  })
+})
+
 describe('二重割当の検証', () => {
   it('同時刻に同じエントリーが2コートにいれば検出する', () => {
     // コート数を1ブロックの同時試合数より多く取ると、
@@ -174,44 +207,90 @@ describe('toTimetable — コート × 時刻のグリッド', () => {
   })
 
   it('埋まらないコートは null になる', () => {
-    const s2 = buildSchedule([block('a', 'A組', 3)], OPTS) // 3試合
+    // 3チームブロックは同時1試合しか流せないため、3試合＝3枠になる。
+    const s2 = buildSchedule([block('a', 'A組', 3)], OPTS)
     const t2 = toTimetable(s2, 6)
-    expect(t2).toHaveLength(1)
-    expect(t2[0].cells.slice(3).every((c) => c.match === null)).toBe(true)
+    expect(t2).toHaveLength(3)
+    expect(t2[0].cells.slice(1).every((c) => c.match === null)).toBe(true)
   })
 })
 
 describe('審判の割当 — 要項でルール化されている', () => {
   const s = buildSchedule(realisticBlocks(), OPTS)
-  const refs = assignReferees(s, { style: 'LOSER', firstMatchRefereeOffsetRows: 3, courtCount: 6 })
+  const refs = assignReferees(s, { style: 'LOSER', firstMatchRefereeRow: 3, courtCount: 6 })
 
   it('全試合に割当が出る', () => {
     expect(refs).toHaveLength(s.length)
   })
 
-  it('第1枠はタイムテーブル3段目の選手に頼む', () => {
-    for (let i = 0; i < 6; i++) {
-      expect(refs[i].note).toContain('3段目')
-      // 3段目＝6コート×3枠先
-      expect(refs[i].fromMatchNumber).toBe(s[i + 18].number)
+  it('第1枠はタイムテーブル3段目・同じコートの選手に頼む', () => {
+    const rows = toTimetable(s, 6)
+    for (let c = 0; c < 6; c++) {
+      const ref = refs.find((r) => r.matchNumber === (rows[0].cells[c].match as { number: number }).number)
+      expect(ref?.note).toContain('3段目')
+      // 3段目＝rows[2]。1段目の2つ下であって3つ下ではない。
+      expect(ref?.fromMatchNumber).toBe((rows[2].cells[c].match as { number: number }).number)
     }
   })
 
-  it('第2枠以降は同じコートの1つ前の試合の敗者審', () => {
-    const r = refs[6]
-    expect(r.note).toContain('敗者2名')
-    expect(r.fromMatchNumber).toBe(s[0].number)
+  it('第2枠以降は同じコートの1つ前の段の敗者審', () => {
+    const rows = toTimetable(s, 6)
+    const target = rows[1].cells[0].match as { number: number }
+    const ref = refs.find((r) => r.matchNumber === target.number)
+    expect(ref?.note).toContain('敗者2名')
+    expect(ref?.fromMatchNumber).toBe((rows[0].cells[0].match as { number: number }).number)
   })
 
   it('相互審判の設定では割当を出さない', () => {
-    const mutual = assignReferees(s, { style: 'MUTUAL', firstMatchRefereeOffsetRows: 3, courtCount: 6 })
+    const mutual = assignReferees(s, { style: 'MUTUAL', firstMatchRefereeRow: 3, courtCount: 6 })
     expect(mutual.every((r) => r.fromMatchNumber === null)).toBe(true)
     expect(mutual[0].note).toBe('相互審判')
   })
 
   it('割当なしの設定では空文字', () => {
-    const none = assignReferees(s, { style: 'NONE', firstMatchRefereeOffsetRows: 3, courtCount: 6 })
+    const none = assignReferees(s, { style: 'NONE', firstMatchRefereeRow: 3, courtCount: 6 })
     expect(none.every((r) => r.note === '')).toBe(true)
+  })
+})
+
+describe('回帰：監査で見つかった入力検証の穴', () => {
+  it('不正な分・時を弾く', () => {
+    expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, startTime: '9:75' })).toThrow()
+    expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, startTime: '99:00' })).toThrow()
+    expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, startTime: '23:59' })).not.toThrow()
+  })
+
+  it('コート数0や負の枠長を弾く', () => {
+    expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, courtCount: 0 })).toThrow()
+    expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, slotMinutes: 0 })).toThrow()
+  })
+
+  it('toTimetable はコート数より大きい番号の試合を落とさない', () => {
+    const s = buildSchedule(realisticBlocks(), OPTS)
+    const t = toTimetable(s, 4) // わざと少なく指定する
+    const shown = t.flatMap((r) => r.cells).filter((c) => c.match !== null).length
+    expect(shown).toBe(s.length)
+    expect(t[0].cells.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('同一時刻・同一コートの重複を検出する', () => {
+    const s = buildSchedule(realisticBlocks(), OPTS)
+    const broken = s.map((m, i) => (i === 1 ? { ...m, court: s[0].court } : m))
+    expect(validateSchedule(broken).some((i) => i.kind === 'COURT_COLLISION')).toBe(true)
+  })
+})
+
+describe('審判割当の検証', () => {
+  const s = buildSchedule(realisticBlocks(), OPTS)
+
+  it('正しい割当なら衝突しない', () => {
+    const refs = assignReferees(s, { style: 'LOSER', firstMatchRefereeRow: 3, courtCount: 6 })
+    expect(validateReferees(s, refs)).toEqual([])
+  })
+
+  it('同時刻に試合中の選手を審判に指名していれば検出する', () => {
+    const refs = assignReferees(s, { style: 'LOSER', firstMatchRefereeRow: 1, courtCount: 6 })
+    expect(validateReferees(s, refs).some((i) => i.kind === 'REFEREE_CONFLICT')).toBe(true)
   })
 })
 

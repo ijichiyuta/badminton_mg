@@ -122,6 +122,13 @@ describe('byePositions — シード本人の枠ではなく初戦の相手枠',
     expect(byes).toHaveLength(12)
     expect(new Set(byes).size).toBe(12)
   })
+  it('参加数がブラケットの半分未満でも必要な数だけ配置する', () => {
+    for (const [bracket, count] of [[8, 1], [8, 3], [16, 2], [16, 5]]) {
+      const byes = byePositions(bracket, count)
+      expect(byes, `${bracket}枠${count}名`).toHaveLength(bracket - count)
+      expect(new Set(byes).size).toBe(bracket - count)
+    }
+  })
 })
 
 describe('opponentSlot', () => {
@@ -161,6 +168,9 @@ describe('buildBracket', () => {
     const a = buildBracket(mkEntries(13, 4), { drawSeed: 7 }).map((s) => s.entryId)
     const b = buildBracket(mkEntries(13, 4), { drawSeed: 7 }).map((s) => s.entryId)
     expect(a).toEqual(b)
+  })
+  it('サイズが足りなければ黙って切り捨てずにエラーにする', () => {
+    expect(() => buildBracket(mkEntries(8), { drawSeed: 1, size: 4 })).toThrow()
   })
   it('欠場者はブラケットに入らない', () => {
     const es = mkEntries(13, 4)
@@ -278,15 +288,34 @@ describe('splitIntoGroups', () => {
     expect(new Set(r.groups.map((g) => g.length))).toEqual(new Set([4]))
   })
 
-  it('62組なら4組と5組が混ざる', () => {
+  it('62組なら4組と5組が混ざる（現行の「4チームリーグ・5チームリーグ」）', () => {
     const r = splitIntoGroups(mkEntries(62), {
       perGroup: 4,
       separateSameAffiliation: false,
       drawSeed: 1,
     })
-    const total = r.groups.reduce((s, g) => s + g.length, 0)
-    expect(total).toBe(62)
-    expect(r.groups.every((g) => g.length === 3 || g.length === 4)).toBe(true)
+    expect(r.groups.reduce((s, g) => s + g.length, 0)).toBe(62)
+    expect(r.groups).toHaveLength(15)
+    expect(r.groups.filter((g) => g.length === 5)).toHaveLength(2)
+    expect(r.groups.filter((g) => g.length === 4)).toHaveLength(13)
+  })
+
+  it('SPLIT を指定すると端数ぶんの小さいブロックを作る', () => {
+    const r = splitIntoGroups(mkEntries(62), {
+      perGroup: 4,
+      remainderPolicy: 'SPLIT',
+      separateSameAffiliation: false,
+      drawSeed: 1,
+    })
+    expect(r.groups).toHaveLength(16)
+    expect(r.groups.filter((g) => g.length === 3)).toHaveLength(2)
+  })
+
+  it('ちょうど割り切れるなら両ポリシーとも同じ', () => {
+    const a = splitIntoGroups(mkEntries(60), { perGroup: 4, separateSameAffiliation: false, drawSeed: 1 })
+    const b = splitIntoGroups(mkEntries(60), { perGroup: 4, remainderPolicy: 'SPLIT', separateSameAffiliation: false, drawSeed: 1 })
+    expect(a.groups).toHaveLength(15)
+    expect(b.groups).toHaveLength(15)
   })
 
   it('全員がいずれか1ブロックに入り、重複しない', () => {

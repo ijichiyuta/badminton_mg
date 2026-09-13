@@ -52,7 +52,11 @@ export interface ScheduleOptions {
   startTime: string
   /** 1枠の長さ（分）。第1号提供先は30分。 */
   slotMinutes: number
-  /** 1ラウンドで同時に流すブロック内試合数。既定2（①②を2コートで同時進行）。 */
+  /**
+   * 1ラウンドで同時に流すブロック内試合数。
+   * 省略時は `floor(チーム数 / 2)`。4・5チームなら2、3チームなら1。
+   * **固定値にしてはならない。** 3チームブロックで同じ選手が2コートに出てしまう。
+   */
   matchesPerRoundPerBlock?: number
   pairingStyle?: PairingStyle
 }
@@ -60,7 +64,12 @@ export interface ScheduleOptions {
 function parseTime(hhmm: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
   if (!m) throw new Error(`時刻の書式が不正です: ${hhmm}`)
-  return Number(m[1]) * 60 + Number(m[2])
+  const h = Number(m[1])
+  const min = Number(m[2])
+  // 正規表現だけでは 9:75 や 99:00 を通してしまう。9:75 が黙って 10:15 になる。
+  if (h > 23) throw new Error(`時が範囲外です: ${hhmm}`)
+  if (min > 59) throw new Error(`分が範囲外です: ${hhmm}`)
+  return h * 60 + min
 }
 
 function formatTime(minutes: number): string {
@@ -76,20 +85,28 @@ function formatTime(minutes: number): string {
  * これは現行のタイムテーブルの並びと同じ。
  */
 export function buildSchedule(blocks: ScheduleBlock[], opts: ScheduleOptions): ScheduledMatch[] {
-  const perRound = opts.matchesPerRoundPerBlock ?? 2
+  if (!Number.isInteger(opts.courtCount) || opts.courtCount < 1) {
+    throw new Error(`コート数は1以上の整数である必要があります: ${opts.courtCount}`)
+  }
+  if (!Number.isFinite(opts.slotMinutes) || opts.slotMinutes <= 0) {
+    throw new Error(`1枠の長さは正の数である必要があります: ${opts.slotMinutes}`)
+  }
   const style = opts.pairingStyle ?? 'njsf'
 
   // ブロックごとに対戦順を出し、ラウンドに切る。
+  // 同時に流せる試合数はブロックのチーム数で決まる。3チームなら1試合ずつ。
   const byBlock = blocks.map((b) => {
-    const pairings = roundRobinPairings(b.entryIds.length, style)
-    return { block: b, rounds: roundsOf(pairings, perRound), pairings }
+    const n = b.entryIds.length
+    const perRound = opts.matchesPerRoundPerBlock ?? Math.max(1, Math.floor(n / 2))
+    const pairings = roundRobinPairings(n, style)
+    return { block: b, perRound, rounds: roundsOf(pairings, perRound) }
   })
   const maxRounds = Math.max(0, ...byBlock.map((x) => x.rounds.length))
 
-  // ラウンド優先で1列に並べる。
+  // ラウンド優先で1列に並べる。全ブロックが①②を終えてから③④へ進む。
   const flat: { block: ScheduleBlock; pair: Pairing; numberInGroup: number; round: number }[] = []
   for (let r = 0; r < maxRounds; r++) {
-    for (const { block, rounds } of byBlock) {
+    for (const { block, rounds, perRound } of byBlock) {
       const round = rounds[r]
       if (!round) continue
       round.forEach((pair, i) => {
@@ -98,18 +115,39 @@ export function buildSchedule(blocks: ScheduleBlock[], opts: ScheduleOptions): S
     }
   }
 
-  // コートと時刻に詰める。
+  // コートと時刻に割り当てる。
+  //
+  // 単純に順番へ詰めると、ブロック数が少ないときに**同じ選手が同時刻の複数コートに出る**。
+  // 1ブロックだけの4チームリーグを6コートに流すと6試合すべてが同じ枠に入ってしまう。
+  // そのため、枠ごとに「すでにその枠にいるエントリー」を見て、衝突する試合は次の枠へ送る。
   const start = parseTime(opts.startTime)
+  const slotEntries: Set<string>[] = []
+  const slotCourts: number[] = []
+
   return flat.map((x, idx) => {
-    const slot = Math.floor(idx / opts.courtCount)
-    const court = (idx % opts.courtCount) + 1
     const [a, b] = x.pair
+    const entryIds: [string, string] = [x.block.entryIds[a - 1], x.block.entryIds[b - 1]]
+
+    let slot = 0
+    for (;; slot++) {
+      if (slotEntries[slot] === undefined) {
+        slotEntries[slot] = new Set()
+        slotCourts[slot] = 0
+      }
+      const full = slotCourts[slot] >= opts.courtCount
+      const clash = entryIds.some((e) => slotEntries[slot].has(e))
+      if (!full && !clash) break
+    }
+
+    for (const e of entryIds) slotEntries[slot].add(e)
+    const court = ++slotCourts[slot]
+
     return {
       blockId: x.block.id,
       blockLabel: x.block.label,
       numberInGroup: x.numberInGroup,
       number: idx + 1,
-      entryIds: [x.block.entryIds[a - 1], x.block.entryIds[b - 1]],
+      entryIds,
       slotPair: x.pair,
       round: x.round,
       court,
@@ -132,8 +170,16 @@ export interface TimetableRow {
   cells: TimetableCell[]
 }
 
-/** コート × 時刻のグリッドに並べ替える。印刷と画面の両方で使う。 */
+/**
+ * コート × 時刻のグリッドに並べ替える。印刷と画面の両方で使う。
+ *
+ * **試合を黙って落とさない。** 引数のコート数よりデータ側のコート番号が大きい場合は
+ * グリッドを広げる。紙から試合が消えるより、列が増えて気づくほうがよい。
+ */
 export function toTimetable(matches: ScheduledMatch[], courtCount: number): TimetableRow[] {
+  const maxCourt = matches.reduce((mx, m) => Math.max(mx, m.court), 0)
+  const cols = Math.max(courtCount, maxCourt)
+
   const byTime = new Map<string, ScheduledMatch[]>()
   for (const m of matches) {
     const arr = byTime.get(m.scheduledAt)
@@ -144,7 +190,7 @@ export function toTimetable(matches: ScheduledMatch[], courtCount: number): Time
     .sort((a, b) => parseTime(a[0]) - parseTime(b[0]))
     .map(([time, ms]) => ({
       time,
-      cells: Array.from({ length: courtCount }, (_, i) => ({
+      cells: Array.from({ length: cols }, (_, i) => ({
         match: ms.find((m) => m.court === i + 1) ?? null,
       })),
     }))
@@ -168,10 +214,10 @@ export interface RefereeAssignment {
 export interface RefereeOptions {
   style: RefereeStyle
   /**
-   * 第1試合の審判を「タイムテーブルの何段目の選手」に頼むか。
-   * 第1号提供先の要項は3段目。
+   * 第1試合の審判を「タイムテーブルの何段目の選手」に頼むか。**1-based の段数**。
+   * 第1号提供先の要項は3段目＝1段目の2つ下。
    */
-  firstMatchRefereeOffsetRows: number
+  firstMatchRefereeRow: number
   courtCount: number
 }
 
@@ -191,27 +237,36 @@ export function assignReferees(
     return matches.map((m) => ({ matchNumber: m.number, fromMatchNumber: null, note: '' }))
   }
 
-  const rows = opts.courtCount
-  const firstSlotCount = rows // 最初の1枠分の試合数
+  // 枠（時刻）ごとに並べ直す。段数は枠の並びで数える。
+  const times = [...new Set(matches.map((m) => m.scheduledAt))].sort(
+    (a, b) => parseTime(a) - parseTime(b),
+  )
+  const rowOf = new Map(times.map((t, i) => [t, i]))
+  const byRowCourt = new Map<string, ScheduledMatch>()
+  for (const m of matches) byRowCourt.set(`${rowOf.get(m.scheduledAt)}:${m.court}`, m)
 
-  return matches.map((m, idx) => {
+  const targetRow = opts.firstMatchRefereeRow - 1 // 1-based の段数を 0-based へ
+
+  return matches.map((m) => {
     if (opts.style === 'MUTUAL') {
       return { matchNumber: m.number, fromMatchNumber: null, note: '相互審判' }
     }
-    // 最初の枠の試合には敗者がまだいない。N段目の試合の選手に頼む。
-    if (idx < firstSlotCount) {
-      const target = idx + opts.firstMatchRefereeOffsetRows * rows
-      const from = matches[target]
+    const row = rowOf.get(m.scheduledAt) ?? 0
+
+    // 1段目の試合には敗者がまだいない。N段目の同じコートの選手に頼む。
+    if (row === 0) {
+      const from = byRowCourt.get(`${targetRow}:${m.court}`)
       return {
         matchNumber: m.number,
         fromMatchNumber: from ? from.number : null,
         note: from
-          ? `タイムテーブル${opts.firstMatchRefereeOffsetRows}段目（第${from.number}試合）の選手`
-          : `タイムテーブル${opts.firstMatchRefereeOffsetRows}段目の選手`,
+          ? `タイムテーブル${opts.firstMatchRefereeRow}段目（第${from.number}試合）の選手`
+          : `タイムテーブル${opts.firstMatchRefereeRow}段目の選手`,
       }
     }
-    // 以降は敗者審。同じコートの1つ前の試合の敗者2名＋勝者1名。
-    const prev = matches[idx - rows]
+
+    // 以降は敗者審。同じコートの1つ前の段の試合の敗者2名＋勝者1名。
+    const prev = byRowCourt.get(`${row - 1}:${m.court}`)
     return {
       matchNumber: m.number,
       fromMatchNumber: prev ? prev.number : null,
@@ -224,7 +279,11 @@ export function assignReferees(
 // 検証
 // ---------------------------------------------------------------------------
 
-export type ScheduleIssueKind = 'DOUBLE_BOOKED' | 'BACK_TO_BACK' | 'REFEREE_CONFLICT'
+export type ScheduleIssueKind =
+  | 'DOUBLE_BOOKED'
+  | 'BACK_TO_BACK'
+  | 'REFEREE_CONFLICT'
+  | 'COURT_COLLISION'
 
 export interface ScheduleIssue {
   kind: ScheduleIssueKind
@@ -269,28 +328,79 @@ export function validateSchedule(
     }
   }
 
-  // 連続試合。既定では警告しない（1枠空けを求める設定のときだけ）。
-  const minGap = opts.minIntervalSlots ?? 0
-  if (minGap > 0) {
-    const lastSlot = new Map<string, { slot: number; number: number }>()
-    const slots = [...bySlot.keys()].sort((a, b) => parseTime(a) - parseTime(b))
-    const slotIndex = new Map(slots.map((t, i) => [t, i]))
-    for (const m of matches) {
-      const si = slotIndex.get(m.scheduledAt) ?? 0
-      for (const e of m.entryIds) {
-        const prev = lastSlot.get(e)
-        if (prev && si - prev.slot <= minGap) {
-          issues.push({
-            kind: 'BACK_TO_BACK',
-            detail: `連続する試合の間隔が ${minGap} 枠未満です`,
-            matchNumbers: [prev.number, m.number],
-          })
-        }
-        lastSlot.set(e, { slot: si, number: m.number })
+  // 同じ時刻・同じコートに2試合。
+  for (const [time, ms] of bySlot) {
+    const byCourt = new Map<number, number>()
+    for (const m of ms) {
+      const prev = byCourt.get(m.court)
+      if (prev !== undefined) {
+        issues.push({
+          kind: 'COURT_COLLISION',
+          detail: `${time} の ${m.court}番コートに2試合が入っています`,
+          matchNumbers: [prev, m.number],
+        })
+      } else {
+        byCourt.set(m.court, m.number)
       }
     }
   }
 
+  // 連続試合。既定では警告しない（1枠空けを求める設定のときだけ）。
+  const minGap = opts.minIntervalSlots ?? 0
+  if (minGap > 0) {
+    const slots = [...bySlot.keys()].sort((a, b) => parseTime(a) - parseTime(b))
+    const slotIndex = new Map(slots.map((t, i) => [t, i]))
+    // 配列順ではなく**時刻順**に見る。コート順に並んだ配列でも正しく判定するため。
+    const sorted = [...matches].sort(
+      (a, b) => (slotIndex.get(a.scheduledAt) ?? 0) - (slotIndex.get(b.scheduledAt) ?? 0),
+    )
+    const lastSlot = new Map<string, { slot: number; number: number }>()
+    for (const m of sorted) {
+      const si = slotIndex.get(m.scheduledAt) ?? 0
+      for (const e of m.entryIds) {
+        const prev = lastSlot.get(e)
+        // 同一枠は DOUBLE_BOOKED の担当。ここでは扱わない。
+        if (prev && si > prev.slot && si - prev.slot <= minGap) {
+          issues.push({
+            kind: 'BACK_TO_BACK',
+            detail: `試合の間隔が ${minGap} 枠以下です（${minGap + 1} 枠以上空ける設定）`,
+            matchNumbers: [prev.number, m.number],
+          })
+        }
+        if (!prev || si > prev.slot) lastSlot.set(e, { slot: si, number: m.number })
+      }
+    }
+  }
+
+  return issues
+}
+
+/**
+ * 審判割当の検証。
+ *
+ * **自分が試合中の選手を審判に指名していないか。** 同時刻に別コートで試合をしている
+ * 選手は審判に立てない。紙に印字してから気づくと現場で破綻する。
+ */
+export function validateReferees(
+  matches: ScheduledMatch[],
+  assignments: RefereeAssignment[],
+): ScheduleIssue[] {
+  const byNumber = new Map(matches.map((m) => [m.number, m]))
+  const issues: ScheduleIssue[] = []
+
+  for (const a of assignments) {
+    if (a.fromMatchNumber === null) continue
+    const target = byNumber.get(a.matchNumber)
+    const source = byNumber.get(a.fromMatchNumber)
+    if (!target || !source) continue
+    if (target.scheduledAt === source.scheduledAt) {
+      issues.push({
+        kind: 'REFEREE_CONFLICT',
+        detail: `第${a.matchNumber}試合の審判に、同時刻に試合中の選手が指名されています`,
+        matchNumbers: [a.matchNumber, a.fromMatchNumber],
+      })
+    }
+  }
   return issues
 }
 

@@ -112,10 +112,18 @@ export function byePositions(bracket: number, entryCount: number): number[] {
     const slot = opponentSlot(order[seed - 1])
     if (used.has(slot)) continue
     // シード本人が入る枠を BYE で潰さない。
-    if (out.length < count && !isSeedSlot(order, slot, seed)) {
+    if (!isSeedSlot(order, slot, seed)) {
       used.add(slot)
       out.push(slot)
     }
+  }
+  // 参加数がブラケットの半分未満のときは、上の規則だけでは足りない。
+  // 残りはシード順の後ろから埋める（上位シードの山を空けたままにする）。
+  for (let i = bracket - 1; i >= 0 && out.length < count; i--) {
+    const slot = order[i]
+    if (used.has(slot)) continue
+    used.add(slot)
+    out.push(slot)
   }
   return out
 }
@@ -151,6 +159,11 @@ export interface BuildBracketOptions {
 export function buildBracket(entries: Entry[], opts: BuildBracketOptions): BracketSlot[] {
   const active = entries.filter((e) => e.status !== 'WITHDRAWN')
   const size = opts.size ?? bracketSize(active.length)
+  if (size < active.length) {
+    throw new Error(
+      `ブラケットサイズ ${size} に ${active.length} エントリーは入りません。黙って切り捨てない`,
+    )
+  }
   const order = seedOrder(size)
   const slots: BracketSlot[] = Array.from({ length: size }, (_, i) => ({
     position: i + 1,
@@ -194,6 +207,14 @@ export interface SplitOptions {
   groupCount?: number
   /** 1ブロックあたりの人数を指定する方式。 */
   perGroup?: number
+  /**
+   * `perGroup` 指定時の端数の扱い。
+   *
+   * - `ABSORB`（既定）… ブロック数を減らし、**端数を既存ブロックに吸収して大きくする**。
+   *   62組を4人ずつなら 5人×2 + 4人×13。第1号提供先の「4チームリーグ・5チームリーグ」と一致する
+   * - `SPLIT` … ブロック数を増やし、端数ぶんの小さいブロックを作る。62組なら 4人×14 + 3人×2
+   */
+  remainderPolicy?: 'ABSORB' | 'SPLIT'
   /** 同一所属を同じブロックに入れない配慮を行う。 */
   separateSameAffiliation: boolean
   drawSeed: number
@@ -221,7 +242,10 @@ export function splitIntoGroups(entries: Entry[], opts: SplitOptions): SplitResu
   if (opts.groupCount !== undefined) {
     count = Math.max(1, Math.min(opts.groupCount, n))
   } else if (opts.perGroup !== undefined && opts.perGroup > 0) {
-    count = Math.max(1, Math.ceil(n / opts.perGroup))
+    count =
+      (opts.remainderPolicy ?? 'ABSORB') === 'ABSORB'
+        ? Math.max(1, Math.floor(n / opts.perGroup))
+        : Math.max(1, Math.ceil(n / opts.perGroup))
   } else {
     throw new Error('groupCount か perGroup のどちらかを指定してください')
   }

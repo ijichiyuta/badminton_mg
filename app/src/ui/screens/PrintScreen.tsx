@@ -387,7 +387,8 @@ function PrintScoresheet({
     date: tournament.date,
     venue: tournament.venue,
     eventName: idx.eventById.get(match.eventId)?.name ?? '',
-    blockName: idx.blockLabel(match.groupId),
+    // blockLabel は種目名を含むので、組名だけを取り出す（種目欄で重複させない）
+    blockName: idx.groupById.get(match.groupId ?? '')?.name ?? '',
     courtName: `${match.courtId?.replace('c', '')}番コート`,
     scheduledAt: match.scheduledAt ?? '',
     sideA: { names: namesOf(match.entryIds[0]), affiliation: idx.entryAffiliation(match.entryIds[0]) },
@@ -401,70 +402,170 @@ function PrintScoresheet({
   return <ScoresheetSheet sheet={sheet} />
 }
 
-/** フルグリッド版のスコアシート。記入例と同じ構造。 */
+/**
+ * フルグリッド版のスコアシート。**公式フォーマット（A4横）の構造に合わせる。**
+ *
+ *   年度 / 大会名 ─────── スコアシート ─────── コート / 番号
+ *   ┌──────┬────────────┬──────────┬────────────┐
+ *   │ 種目  │ 選手名・所属  │スコア(ゲーム)│ 選手名・所属  │
+ *   └──────┴────────────┴──────────┴────────────┘
+ *   ┌─┬────────┬──────────────────────────┐
+ *   │1│（4行）    │ 42マスの得点欄。中央に太線でペアを分ける │
+ *   ├─┼────────┼──────────────────────────┤
+ *   │2│ …
+ *   勝者氏名 ── 主審署名 ── 開始時刻 ── 終了時刻
+ *
+ * **選手名は上部の情報欄に1回だけ書く。** 各段の左には小さく再掲する
+ * （どの行が誰かを記録者が見失わないため）。
+ */
 export function ScoresheetSheet({ sheet }: { sheet: Scoresheet }) {
+  const half = Math.ceil(sheet.rows.length / 2)
+  const sideA = sheet.rows.slice(0, half)
+  const sideB = sheet.rows.slice(half)
+
   return (
-    <section className="print-page mb-8 border border-ink p-2">
-      {/* ヘッダ */}
-      <div className="mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-b border-ink pb-1 text-[11px]">
-        <span className="text-base font-bold tabular">第{sheet.number}試合</span>
-        <span className="font-medium">{sheet.eventName}</span>
-        <span>{sheet.blockName}</span>
-        <span>{sheet.courtName}</span>
-        <span className="tabular">{sheet.scheduledAt}</span>
-        <span className="ml-auto">{sheet.ruleLabel}</span>
-      </div>
-
-      <div className="mb-1 flex flex-wrap gap-x-4 text-[10px] text-ink-2">
+    <section className="print-page mb-6">
+      {/* 上部：大会名 ── スコアシート ── コート / 番号 */}
+      <div className="mb-1 flex items-baseline gap-3 text-[11px]">
         <span>
-          {sheet.tournamentName} / {sheet.date} / {sheet.venue}
+          <span className="font-medium">{sheet.tournamentName}</span>
         </span>
-        {sheet.refereeNote && <span>審判：{sheet.refereeNote}</span>}
+        <span className="text-ink-2">{sheet.date}</span>
+        <span className="flex-1 text-center text-sm font-bold tracking-[0.3em]">スコアシート</span>
+        <span>
+          コート <span className="font-medium">{sheet.courtName.replace('番コート', '')}</span>
+        </span>
+        <span>
+          番号 <span className="text-base font-bold tabular">{sheet.number}</span>
+        </span>
       </div>
 
-      {/* ゲームごとのグリッド */}
-      {sheet.games.map((g, gi) => (
-        <table key={gi} className="mb-1.5 w-full border-collapse text-[9px]">
-          <tbody>
-            {sheet.rows.map((r, ri) => (
-              <tr key={ri}>
-                {/* 選手名 */}
-                <td className="w-32 border border-ink px-1 py-0 leading-tight">
+      {/* 情報欄。左右に選手名、中央にスコア */}
+      <table className="mb-1.5 w-full border-collapse text-[11px]">
+        <thead>
+          <tr>
+            <th className="w-20 border border-ink px-1 py-0.5 font-normal">種目</th>
+            <th className="border border-ink px-1 py-0.5 font-normal">選手名・所属</th>
+            <th className="w-32 border border-ink px-1 py-0.5 font-normal">スコア（ゲーム）</th>
+            <th className="border border-ink px-1 py-0.5 font-normal">選手名・所属</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="border border-ink px-1 py-1 text-center align-middle leading-tight">
+              <div className="font-medium">{sheet.eventName}</div>
+              <div className="text-[9px] text-ink-2">{sheet.blockName}</div>
+            </td>
+            <td className="border border-ink px-2 py-1 align-middle">
+              {sideA.map((r, i) => (
+                <div key={i} className="leading-snug">
                   <span className="font-medium">{r.name}</span>
-                  {ri % 2 === 1 && (
-                    <span className="ml-1 text-[8px] text-ink-2">（{r.affiliation}）</span>
+                  {i === sideA.length - 1 && (
+                    <span className="ml-1 text-[9px] text-ink-2">（{r.affiliation}）</span>
                   )}
-                </td>
-                {/* S / R の記入欄 */}
-                <td className="w-5 border border-ink text-center" />
-                {/* 得点欄 */}
-                {Array.from({ length: g.columns }, (_, ci) => (
-                  <td key={ci} className="border border-rule" style={{ height: 16 }} />
-                ))}
-              </tr>
-            ))}
+                </div>
+              ))}
+            </td>
+            <td className="border border-ink px-2 py-1 text-center align-middle">
+              {[0, 1, 2].slice(0, Math.min(3, sheet.games.length)).map((i) => (
+                <div key={i} className="my-0.5 flex items-center justify-center gap-1">
+                  <span className="inline-block w-8 border-b border-ink" />
+                  <span className="text-ink-2">−</span>
+                  <span className="inline-block w-8 border-b border-ink" />
+                </div>
+              ))}
+            </td>
+            <td className="border border-ink px-2 py-1 align-middle">
+              {sideB.map((r, i) => (
+                <div key={i} className="leading-snug">
+                  <span className="font-medium">{r.name}</span>
+                  {i === sideB.length - 1 && (
+                    <span className="ml-1 text-[9px] text-ink-2">（{r.affiliation}）</span>
+                  )}
+                </div>
+              ))}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* 得点欄。ゲームごとに1段 */}
+      {sheet.games.map((g, gi) => (
+        <table key={gi} className="mb-1 w-full border-collapse">
+          <tbody>
+            {sheet.rows.map((r, ri) => {
+              // ペアの境界に太線を引く（上2行がAサイド、下2行がBサイド）
+              const boundary = ri === half - 1
+              return (
+                <tr key={ri}>
+                  {ri === 0 && (
+                    <td
+                      rowSpan={sheet.rows.length}
+                      className="w-6 border border-ink text-center align-middle text-sm font-bold"
+                    >
+                      {gi + 1}
+                    </td>
+                  )}
+                  {/* 選手名の再掲。どの行が誰かを見失わないため */}
+                  <td
+                    className={
+                      'w-24 border-x border-ink px-1 text-[8px] leading-none ' +
+                      (ri === 0 ? 'border-t ' : '') +
+                      (ri === sheet.rows.length - 1 ? 'border-b ' : '') +
+                      (boundary ? 'border-b-2 border-b-ink ' : 'border-b border-b-rule ')
+                    }
+                    style={{ height: 17 }}
+                  >
+                    {r.name}
+                  </td>
+                  {/* S / R の記入欄 */}
+                  <td
+                    className={
+                      'w-5 border-x border-ink ' +
+                      (ri === 0 ? 'border-t ' : '') +
+                      (ri === sheet.rows.length - 1 ? 'border-b ' : '') +
+                      (boundary ? 'border-b-2 border-b-ink ' : 'border-b border-b-rule ')
+                    }
+                  />
+                  {/* 得点マス */}
+                  {Array.from({ length: g.columns }, (_, ci) => (
+                    <td
+                      key={ci}
+                      className={
+                        'border-r border-r-rule ' +
+                        (ci === g.columns - 1 ? 'border-r-ink ' : '') +
+                        (ri === 0 ? 'border-t border-t-ink ' : '') +
+                        (ri === sheet.rows.length - 1 ? 'border-b border-b-ink ' : '') +
+                        (boundary ? 'border-b-2 border-b-ink ' : 'border-b border-b-rule ')
+                      }
+                    />
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       ))}
 
-      {/* 結果欄 */}
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-1 border-t border-ink pt-1 text-[10px]">
+      {/* 下部 */}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-1 pt-1 text-[10px]">
         <span>
-          スコア
-          <span className="ml-2 inline-block w-10 border-b border-ink" /> −
-          <span className="ml-1 inline-block w-10 border-b border-ink" />
+          勝者氏名 <span className="inline-block w-28 border-b border-ink" />
         </span>
         <span>
-          開始 <span className="inline-block w-12 border-b border-ink" /> 終了{' '}
-          <span className="inline-block w-12 border-b border-ink" />
+          主審署名 <span className="inline-block w-28 border-b border-ink" />
         </span>
         <span>
-          勝者署名 <span className="inline-block w-24 border-b border-ink" />
+          開始時刻 <span className="inline-block w-14 border-b border-ink" />
         </span>
         <span>
-          主審署名 <span className="inline-block w-24 border-b border-ink" />
+          終了時刻 <span className="inline-block w-14 border-b border-ink" />
         </span>
+        <span className="ml-auto text-ink-2">{sheet.ruleLabel}</span>
       </div>
+      {sheet.refereeNote && (
+        <div className="mt-0.5 text-[9px] text-ink-2">審判：{sheet.refereeNote}</div>
+      )}
       <div className="mt-0.5 text-[8px] text-ink-2">
         得点したペアの、次にサービスをする選手の行に記入してください。最初は両方に 0 を記入します。
         {sheet.deuceFrom !== null && ` ${sheet.deuceFrom}オールになったら次の欄に斜め線を入れてください。`}

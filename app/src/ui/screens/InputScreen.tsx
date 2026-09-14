@@ -64,7 +64,7 @@ export function InputScreen({ match, rule, idx, onSubmit, onClear, onPickNumber,
     <div className="flex h-full flex-col">
       {/* ヘッダ。試合番号の直接入力を常時置く（紙からの転記） */}
       <div className="flex items-center gap-2 border-b border-rule px-3 py-2">
-        <span className="text-xs text-ink-3">試合番号</span>
+        <span className="shrink-0 whitespace-nowrap text-xs text-ink-3">試合番号</span>
         <input
           inputMode="numeric"
           value={numberDraft}
@@ -86,12 +86,14 @@ export function InputScreen({ match, rule, idx, onSubmit, onClear, onPickNumber,
               setNumberDraft('')
             }
           }}
-          className="rounded border border-rule px-3 text-sm"
+          className="shrink-0 whitespace-nowrap rounded border border-rule px-3 text-sm"
           style={{ minHeight: 44 }}
         >
           開く
         </button>
-        <span className="ml-auto text-xs text-ink-3">{describeRule(rule).replace('この種目は ', '')}</span>
+        <span className="ml-auto min-w-0 truncate text-xs text-ink-3">
+          {describeRule(rule).replace('この種目は ', '').replace(' の設定です', '').replace('の設定です', '')}
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">

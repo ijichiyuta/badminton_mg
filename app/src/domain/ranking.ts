@@ -421,12 +421,18 @@ function resolve(
 
     const out: RankedEntry[] = []
     let cursor = startRank
-    for (const g of split) {
-      const others = tied.filter((id) => id !== g.members[0].entryId)
+    for (const [gi, g] of split.entries()) {
       if (g.members.length === 1) {
         const s = g.members[0]
         const full = overall.get(s.entryId) ?? s
-        const reason = `${recordText(full)}。${labelOf(ctx, others)}と並んだため${scopeLabel}、${METRIC_LABEL[c]} ${formatMetric(c, g.value)} で上回りました`
+        // **順位に応じて言い方を変える。** 最下位に「上回りました」と書いてはならない。
+        const verb =
+          gi === 0 ? '上回りました' : gi === split.length - 1 ? '下回りました' : 'でした'
+        const tail =
+          verb === 'でした'
+            ? `${METRIC_LABEL[c]} ${formatMetric(c, g.value)}`
+            : `${METRIC_LABEL[c]} ${formatMetric(c, g.value)} で${verb}`
+        const reason = `${recordText(full)}。${tiedLabel(tied.length)}のため${scopeLabel}、${tail}`
         out.push(fixed(s, cursor, overall, reason))
       } else {
         out.push(
@@ -449,8 +455,9 @@ function resolve(
   return unresolved(ctx, tied, startRank, overall, rng, drawUsed)
 }
 
-function labelOf(_ctx: RankingContext, others: string[]): string {
-  return others.length === 1 ? '1者' : `${others.length}者`
+/** 同率だった人数の言い方。「1者と並んだため」は日本語として不自然。 */
+function tiedLabel(n: number): string {
+  return n === 2 ? '同率の相手がいた' : `${n}者が同率だった`
 }
 
 function unresolved(

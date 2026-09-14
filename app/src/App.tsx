@@ -113,26 +113,28 @@ function OperatorApp() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col bg-paper">
       {/* ヘッダ。文字サイズは設定画面ではなく常時アクセスできる位置に置く */}
-      <header className="flex items-center gap-2 border-b border-rule px-3 py-2 no-print">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-bold leading-tight">{t.name}</div>
-          <div className="truncate text-xs text-ink-3">
-            {t.date} · {t.venue} · {courtCount}コート
-          </div>
+      <header className="border-b border-rule px-3 py-1.5 no-print">
+        <div className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-sm font-bold leading-tight">{t.name}</span>
+          <span className="shrink-0 text-xs text-ink-3 tabular">{t.date}</span>
+          <span className="min-w-0 truncate text-xs text-ink-3">{t.venue}</span>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="mt-0.5 flex items-center gap-1">
+          <span className="text-xs text-ink-3 tabular">{courtCount}コート</span>
+          <span className="text-xs text-ink-3">·</span>
+          <span className="text-xs text-ink-3 tabular">{matches.length}試合</span>
           {app.publishState.configured && (
             <button
               onClick={() => void app.publishNow()}
               disabled={app.publishState.busy}
               aria-label="速報を公開"
               className={
-                'rounded border px-2 text-xs ' +
+                'ml-auto shrink-0 rounded border px-2 text-xs ' +
                 (app.publishState.publishedAt
                   ? 'border-ok text-ok'
                   : 'border-rule text-ink-2')
               }
-              style={{ minHeight: 44 }}
+              style={{ minHeight: 40 }}
             >
               {app.publishState.busy
                 ? '送信中'
@@ -149,10 +151,10 @@ function OperatorApp() {
               onClick={() => setSize(s)}
               aria-label={`文字サイズ ${['小', '標準', '大'][i]}`}
               className={
-                'rounded border px-2 ' +
+                'shrink-0 rounded border px-1.5 ' +
                 (size === s ? 'border-primary bg-primary text-paper' : 'border-rule text-ink-2')
               }
-              style={{ minHeight: 44, minWidth: 44, fontSize: [12, 15, 19][i] }}
+              style={{ minHeight: 40, minWidth: 40, fontSize: [11, 14, 17][i] }}
             >
               A
             </button>

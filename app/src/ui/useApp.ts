@@ -3,7 +3,7 @@
 // 同期もサーバもない。端末内の Dexie だけが正（ADR-0001）。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { db, type BadmintonDb } from '../store/db'
+import { db } from '../store/db'
 import {
   addEntries,
   addEvent,
@@ -82,16 +82,16 @@ export function useApp() {
     void requestPersistentStorage()
   }, [])
 
-  /** 大会が1つも無ければ null を返す。デモは作らない。 */
-  const loadTournament = useCallback(async (d: BadmintonDb) => {
-    const all = await d.tournaments.toArray()
-    return all[0] ?? null
-  }, [])
-
   const load = useCallback(async () => {
     try {
       const d = db()
-      const t = await ensureDemo(d)
+      // 大会が複数あるとき、**最後に作った／更新したもの**を開く。
+      // 先頭を固定で読むと、新しく作った大会が画面に出ない。
+      const all = await d.tournaments.toArray()
+      const t =
+        all.length === 0
+          ? await ensureDemo(d)
+          : [...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
       const where = { tournamentId: t.id }
       const [events, groups, entries, players, matches, scoringRules] = await Promise.all([
         d.events.where(where).toArray(),
@@ -330,7 +330,6 @@ export function useApp() {
     setupActions,
     publishState,
     publishNow,
-    loadTournament,
     reload: load,
   }
 }

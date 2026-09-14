@@ -14,15 +14,21 @@
 
 import type { ScoringRuleSet } from '../domain/types'
 
-/** 1ゲームぶんのグリッドに必要な列数。 */
+/**
+ * 1ゲームぶんのグリッドに必要な列数。
+ *
+ * 公式フォーマット（A4横）は **42マス／段**で、15点制・21点制のどちらも
+ * これで足りる設計になっている。上限の高い設定でだけ必要数まで増やす。
+ */
+export const OFFICIAL_COLUMNS = 42
+
 export function columnsPerGame(rule: ScoringRuleSet): number {
-  if (rule.winCondition === 'TIME') return 40
+  if (rule.winCondition === 'TIME') return OFFICIAL_COLUMNS
   const base = rule.pointsPerGame ?? 0
   // 最大ラリー数＝両者の最終得点の和。上限があればそれで決まる。
   const cap = rule.maxPoints ?? base * 2
-  const max = cap + (cap - 1)
-  // 先頭の 0 のぶんを足し、少し余裕を持たせる。
-  return Math.max(20, max + 2)
+  const needed = cap + (cap - 1) + 1 // 先頭の 0 のぶん
+  return Math.max(OFFICIAL_COLUMNS, needed)
 }
 
 /** 行の見出し。ダブルスは4行、シングルスは2行。 */

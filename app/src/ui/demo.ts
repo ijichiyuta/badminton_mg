@@ -27,9 +27,15 @@ const FAMILY = ['青木', '井上', '遠藤', '大野', '加藤', '木村', '工
 const GIVEN_M = ['健太', '翔', '大輔', '拓也', '涼', '直樹', '悠', '亮', '和也', '駿']
 const GIVEN_F = ['美咲', '陽菜', '彩', '奈々', '真央', '楓', '結衣', '里桜', '千尋', '紗希']
 
+/**
+ * 架空の氏名。姓と名を別々の周期で回して、ペアの2人が同名にならないようにする。
+ * 素直に i を割ると、隣り合う2人の名が同じになって明らかに嘘くさくなる。
+ */
 function name(i: number, female: boolean): string {
+  const given = female ? GIVEN_F : GIVEN_M
   const f = FAMILY[i % FAMILY.length]
-  const g = (female ? GIVEN_F : GIVEN_M)[Math.floor(i / FAMILY.length) % 10]
+  // 姓の周期（10）と互いに素な周期で名を回す。
+  const g = given[(i * 3 + Math.floor(i / FAMILY.length)) % given.length]
   return `${f} ${g}`
 }
 
@@ -61,7 +67,7 @@ export async function seedDemo(
 ): Promise<TournamentRecord> {
   const t = await createTournament(
     {
-      name: 'デモ大会（構成は実際の大会に合わせています）',
+      name: 'デモ大会',
       date: '2026-09-06',
       venue: '市民体育館',
       organizer: 'デモ',

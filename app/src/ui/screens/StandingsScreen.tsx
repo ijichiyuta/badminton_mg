@@ -106,24 +106,28 @@ export function GroupTable({
 
   return (
     <div className="p-3">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-bold">{idx.blockLabel(group.id)}</h2>
-        {rule && <span className="text-xs text-ink-2">{describeRule(rule).replace('この種目は ', '')}</span>}
-        {result && (
-          <span
-            className={
-              'ml-auto rounded px-2 py-0.5 text-xs font-bold ' +
-              (result.provisional ? 'bg-warn-soft text-warn' : 'bg-ok-soft text-ok')
-            }
-          >
-            {result.provisional ? '暫定' : '確定'}
-          </span>
+      <div className="mb-2">
+        <div className="flex items-baseline gap-2">
+          <h2 className="min-w-0 truncate text-base font-bold">{idx.blockLabel(group.id)}</h2>
+          {result && (
+            <span
+              className={
+                'ml-auto shrink-0 rounded px-2 py-0.5 text-xs font-bold ' +
+                (result.provisional ? 'bg-warn-soft text-warn' : 'bg-ok-soft text-ok')
+              }
+            >
+              {result.provisional ? '暫定' : '確定'}
+            </span>
+          )}
+        </div>
+        {rule && (
+          <div className="text-xs text-ink-2">{describeRule(rule).replace('この種目は ', '')}</div>
         )}
       </div>
 
       {/* 星取表。横スクロールはこの中だけ。ページ全体を横に振らせない */}
       <div className="overflow-x-auto border border-rule">
-        <table className="w-full border-collapse text-sm" style={{ minWidth: 480 }}>
+        <table className="w-full border-collapse text-sm" style={{ minWidth: 520 }}>
           <thead>
             <tr className="bg-rule-2/60">
               <th className="border-b border-r border-rule px-2 py-1 text-left text-xs font-normal text-ink-3">
@@ -132,7 +136,7 @@ export function GroupTable({
               {ids.map((_, j) => (
                 <th
                   key={j}
-                  className="w-12 border-b border-r border-rule px-1 py-1 text-xs font-normal text-ink-3"
+                  className="w-14 border-b border-r border-rule px-1 py-1 text-xs font-normal text-ink-3"
                 >
                   {j + 1}
                 </th>
@@ -160,13 +164,21 @@ export function GroupTable({
                     }
                     const m = cellMatch(a, b)
                     const upper = j > i
+                    // **自分の点だけを並べると読めない。** ゲームカウントで出す。
+                    // 各ゲームのスコアは入力画面で確認できる。
                     const mine = m?.entryIds[0] === a ? 0 : 1
-                    const score =
-                      m && m.status === 'COMPLETED' && m.games.length > 0
-                        ? m.games
-                            .map((g) => (mine === 0 ? g.scoreA : g.scoreB))
-                            .join('-')
-                        : null
+                    let score: string | null = null
+                    if (m && m.status === 'COMPLETED' && m.games.length > 0) {
+                      let w = 0
+                      let l = 0
+                      for (const g of m.games) {
+                        const my = mine === 0 ? g.scoreA : g.scoreB
+                        const th = mine === 0 ? g.scoreB : g.scoreA
+                        if (my > th) w++
+                        else if (th > my) l++
+                      }
+                      score = `${w}-${l}`
+                    }
                     const won = m?.winnerEntryId === a
                     return (
                       <td
@@ -181,7 +193,8 @@ export function GroupTable({
                         {m?.status === 'COMPLETED' ? (
                           <div
                             className={
-                              'text-xs leading-tight tabular ' + (won ? 'font-bold text-ok' : 'text-ink-2')
+                              'whitespace-nowrap text-xs leading-tight tabular ' +
+                              (won ? 'font-bold text-ok' : 'text-ink-2')
                             }
                           >
                             {won ? '○' : '●'}

@@ -110,11 +110,16 @@ function Side({ id, won, idx }: { id: string | null; won: boolean; idx: Indexes 
   if (id === null) {
     return <div className="truncate text-sm text-ink-3">（勝者待ち）</div>
   }
+  const name = idx.entryLabel(id)
+  const affiliation = idx.entryAffiliation(id)
   return (
     <div className={'truncate text-sm ' + (won ? 'font-bold' : 'text-ink-2')}>
       {won && <span className="mr-1 text-ok">○</span>}
-      {idx.entryLabel(id)}
-      <span className="ml-1 text-xs text-ink-3">{idx.entryAffiliation(id)}</span>
+      {name}
+      {/* 団体戦はチーム名が氏名と所属の両方に入る。同じ文字を2回出さない。 */}
+      {affiliation && affiliation !== name && (
+        <span className="ml-1 text-xs text-ink-3">{affiliation}</span>
+      )}
     </div>
   )
 }

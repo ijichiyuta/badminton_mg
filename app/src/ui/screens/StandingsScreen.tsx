@@ -124,6 +124,9 @@ export function GroupTable({
    */
   const view = (a: string, b: string) => cellView(matches, a, b)
 
+  // 団体戦はエントリーがチームそのもの。所属と氏名を分けて出すと同じ名前が2回並ぶ。
+  const isTeam = matches.some((m) => m.tieId !== null)
+
   const rankOf = (entryId: string) => result?.entries.find((e) => e.entryId === entryId)
 
   return (
@@ -153,7 +156,7 @@ export function GroupTable({
           <thead>
             <tr className="bg-rule-2/60">
               <th className="border-b border-r border-rule px-2 py-1 text-left text-xs font-normal text-ink-3">
-                所属 / 氏名
+                {isTeam ? 'チーム' : '所属 / 氏名'}
               </th>
               {ids.map((_, j) => (
                 <th
@@ -176,7 +179,7 @@ export function GroupTable({
                 <tr key={a} className="align-top">
                   <td className="border-b border-r border-rule px-2 py-1">
                     <div className="text-xs text-ink-3">
-                      {i + 1}. {idx.entryAffiliation(a)}
+                      {i + 1}.{isTeam ? '' : ` ${idx.entryAffiliation(a)}`}
                     </div>
                     <div className="font-medium leading-tight">{idx.entryLabel(a)}</div>
                   </td>
@@ -247,7 +250,9 @@ export function GroupTable({
                 <div className="flex items-baseline gap-2">
                   <span className="text-base font-bold tabular">{e.rank}位</span>
                   <span className="font-medium">{idx.entryLabel(e.entryId)}</span>
-                  <span className="text-xs text-ink-3">{idx.entryAffiliation(e.entryId)}</span>
+                  {!isTeam && (
+                    <span className="text-xs text-ink-3">{idx.entryAffiliation(e.entryId)}</span>
+                  )}
                 </div>
                 <div className="text-sm text-ink-2">{e.reason}</div>
               </div>

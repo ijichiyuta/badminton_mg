@@ -23,6 +23,9 @@ const CLUBS = [
   'なぎさクラブ', 'やまびこ', 'ほたる会', 'せせらぎ', 'かがやきBC',
 ]
 
+/** 団体戦のチーム名。架空のもの。 */
+const TEAMS = ['あおぞらクラブ', 'みどり台BC', 'かえで会', 'しらかば', 'つばさクラブ', 'ひまわり']
+
 const FAMILY = ['青木', '井上', '遠藤', '大野', '加藤', '木村', '工藤', '小林', '斉藤', '清水']
 const GIVEN_M = ['健太', '翔', '大輔', '拓也', '涼', '直樹', '悠', '亮', '和也', '駿']
 const GIVEN_F = ['美咲', '陽菜', '彩', '奈々', '真央', '楓', '結衣', '里桜', '千尋', '紗希']
@@ -114,6 +117,11 @@ export async function seedDemo(
     )
   }
 
+  // 団体戦とトーナメントも1つずつ入れておく。
+  // **この道具が何を扱えるかは、触って見ないと伝わらない。**
+  await seedTeamEvent(t.id, d)
+  await seedKnockout(t.id, d)
+
   const matches = await buildMatches(
     t.id,
     { courtCount: 6, startTime: '9:30', slotMinutes: 30 },
@@ -138,6 +146,63 @@ export async function seedDemo(
   }
 
   return t
+}
+
+/** 団体戦。愛知の社会人リーグと同じ 6チーム総当たり・2複1単。 */
+async function seedTeamEvent(tournamentId: string, d: BadmintonDb) {
+  const ev = await addEvent(
+    tournamentId,
+    {
+      name: '男子団体',
+      discipline: 'TEAM',
+      category: '',
+      entryType: 'TEAM',
+      teamLineupId: '2d1s',
+      scoringRuleId: null,
+      rankingRulePresetId: null,
+    },
+    d,
+  )
+  const st = await addStage(tournamentId, ev.id, { name: 'ブロック戦', type: 'ROUND_ROBIN' }, d)
+  await addEntries(
+    tournamentId,
+    ev.id,
+    TEAMS.map((name) => ({ playerNames: [name], affiliation: name })),
+    d,
+  )
+  await buildGroups({ stageId: st.id, groupCount: 1, drawSeed: 20260906 }, d)
+}
+
+/** トーナメント。13人が16のドローに入る、BYE が多い実際の形。 */
+async function seedKnockout(tournamentId: string, d: BadmintonDb) {
+  const ev = await addEvent(
+    tournamentId,
+    {
+      name: '男子シングルス 選手権',
+      discipline: 'MS',
+      category: '',
+      entryType: 'INDIVIDUAL',
+      scoringRuleId: null,
+      rankingRulePresetId: null,
+    },
+    d,
+  )
+  const st = await addStage(
+    tournamentId,
+    ev.id,
+    { name: 'トーナメント', type: 'SINGLE_ELIMINATION', options: { drawSeed: 20260906 } },
+    d,
+  )
+  await addEntries(
+    tournamentId,
+    ev.id,
+    Array.from({ length: 13 }, (_, i) => ({
+      playerNames: [name(200 + i, false)],
+      affiliation: CLUBS[i % CLUBS.length],
+    })),
+    d,
+  )
+  await buildGroups({ stageId: st.id, groupCount: 1, drawSeed: 20260906 }, d)
 }
 
 /** すでにデモが入っていればそれを返し、無ければ作る。 */

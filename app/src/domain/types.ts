@@ -108,7 +108,15 @@ export type Criterion =
 /** 母集団スコープ。誰との対戦成績で比べるか。 */
 export type TiebreakScope = 'AMONG_TIED' | 'ALL_MATCHES' | 'AMONG_TIED_IF_TWO'
 
-export type UnresolvedAction = 'DRAW' | 'SHARED_RANK' | 'PLAYOFF'
+/**
+ * すべての criteria で並んだままだったときの扱い。
+ *
+ * `HEAD_TO_HEAD` は「上記◯〜◯で決まらない場合は当事者同士で勝った方」という
+ * 要項の文面のためにある（愛知県社会人クラブリーグ 内規14 ほか）。
+ * criteria のスコープが ALL_MATCHES でも、**最後の砦としてだけ**当該者間の勝敗を見る。
+ * これを Criterion 側に足してはならない（docs/adr/0006）。当該者間は母集団スコープであって指標ではない。
+ */
+export type UnresolvedAction = 'DRAW' | 'SHARED_RANK' | 'PLAYOFF' | 'HEAD_TO_HEAD'
 
 export type WithdrawnHandling = 'BASE_POINT_TO_ZERO' | 'ZERO_ZERO' | 'EXCLUDE'
 
@@ -132,8 +140,18 @@ export interface RankingRuleSet {
 export interface EntryStats {
   entryId: string
   played: number
+  /**
+   * 「勝敗」の単位。個人戦ではマッチ数、**団体戦では対戦（Tie）数**。
+   *
+   * 要項が「1. 勝敗による 2. マッチ得失率による」と2段構えで書かれているのは、
+   * 団体戦ではこの2つが別物だから（2複1単なら1対戦=3マッチ）。
+   * ここを同じ数にしてしまうと第2基準が死ぬ。
+   */
   wins: number
   losses: number
+  /** マッチ単位の勝敗。個人戦では wins / losses と一致する。 */
+  matchesWon: number
+  matchesLost: number
   points: number
   gamesWon: number
   gamesLost: number

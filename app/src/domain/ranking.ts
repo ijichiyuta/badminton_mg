@@ -55,6 +55,8 @@ function emptyStats(entryId: string): EntryStats {
     played: 0,
     wins: 0,
     losses: 0,
+    matchesWon: 0,
+    matchesLost: 0,
     points: 0,
     gamesWon: 0,
     gamesLost: 0,
@@ -94,6 +96,23 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
   const stats = new Map<string, EntryStats>()
   for (const id of target) stats.set(id, emptyStats(id))
 
+  // 対戦（Tie）単位の勝敗。団体戦では「勝敗」がこちらの単位になる。
+  // 個人戦でも同じ器を使い、1マッチ=1Tie として扱う。
+  const ties = new Map<string, { won: Map<string, number>; retired: Set<string> }>()
+  const tally = (m: Match, winner: string, loser: string | null) => {
+    // tieId がない試合は、その試合自体を1つの Tie とみなす。
+    const key = m.tieId ?? m.id
+    let t = ties.get(key)
+    if (!t) {
+      t = { won: new Map(), retired: new Set() }
+      ties.set(key, t)
+    }
+    t.won.set(winner, (t.won.get(winner) ?? 0) + 1)
+    if (loser !== null && !t.won.has(loser)) t.won.set(loser, 0)
+    // 棄権は勝点の扱いが違う。対戦のうち1つでも棄権があればその側に適用する。
+    if (isRetirement(m) && m.retiredEntryId) t.retired.add(m.retiredEntryId)
+  }
+
   // 棄権者との対戦を相手の成績からも削除する設定。
   const removed = new Set<string>()
   if (ctx.rule.removeFromOpponents) {
@@ -114,10 +133,8 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
       if (amongOnly) continue
       if (!hasWinner(m) || m.winnerEntryId === null) continue
       const s = stats.get(m.winnerEntryId)
-      if (s) {
-        s.wins++
-        s.points += ctx.rule.pointsForWin
-      }
+      if (s) s.matchesWon++
+      tally(m, m.winnerEntryId, null)
       continue
     }
 
@@ -135,11 +152,13 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
 
     // 勝敗は BYE でも数える（不戦勝は1勝）。
     if (m.winnerEntryId === a) {
-      if (sA) { sA.wins++; sA.points += ctx.rule.pointsForWin }
-      if (sB) { sB.losses++; sB.points += pointsForLoserOf(m, ctx.rule) }
+      if (sA) sA.matchesWon++
+      if (sB) sB.matchesLost++
+      tally(m, a, b)
     } else if (m.winnerEntryId === b) {
-      if (sB) { sB.wins++; sB.points += ctx.rule.pointsForWin }
-      if (sA) { sA.losses++; sA.points += pointsForLoserOf(m, ctx.rule) }
+      if (sB) sB.matchesWon++
+      if (sA) sA.matchesLost++
+      tally(m, b, a)
     }
 
     if (!countsTowardRatios(m)) continue
@@ -170,14 +189,34 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
     }
   }
 
+  // Tie 単位の勝敗を確定させる。勝ちマッチ数が多い側がその対戦の勝ち。
+  // 同数なら引き分けとして、どちらの勝敗にも数えない（要項に定めがないため勝手に決めない）。
+  for (const t of ties.values()) {
+    const entries = [...t.won.entries()]
+    if (entries.length === 0) continue
+    const best = Math.max(...entries.map(([, n]) => n))
+    const winners = entries.filter(([, n]) => n === best)
+    if (winners.length !== 1) continue
+    for (const [id, n] of entries) {
+      const s = stats.get(id)
+      if (!s) continue
+      if (n === best) {
+        s.wins++
+        s.points += ctx.rule.pointsForWin
+      } else {
+        s.losses++
+        s.points += t.retired.has(id) ? ctx.rule.pointsForRetirement : ctx.rule.pointsForLoss
+      }
+    }
+  }
+
   return target.map((id) => stats.get(id) ?? emptyStats(id))
 }
 
-function pointsForLoserOf(m: Match, rule: RankingRuleSet): number {
-  if (m.resultType === 'RETIRED' || m.resultType === 'WITHDRAWN' || m.resultType === 'DISQUALIFIED') {
-    return rule.pointsForRetirement
-  }
-  return rule.pointsForLoss
+function isRetirement(m: Match): boolean {
+  return (
+    m.resultType === 'RETIRED' || m.resultType === 'WITHDRAWN' || m.resultType === 'DISQUALIFIED'
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +241,8 @@ function metricValue(s: EntryStats, c: Criterion): number | null {
     case 'points':
       return s.points
     case 'matchRatio': {
-      const d = s.wins + s.losses
-      return d === 0 ? null : s.wins / d
+      const d = s.matchesWon + s.matchesLost
+      return d === 0 ? null : s.matchesWon / d
     }
     case 'gameRatio': {
       const d = s.gamesWon + s.gamesLost
@@ -214,7 +253,7 @@ function metricValue(s: EntryStats, c: Criterion): number | null {
       return d === 0 ? null : s.pointsWon / d
     }
     case 'matchDiff':
-      return s.wins - s.losses
+      return s.matchesWon - s.matchesLost
     case 'gameDiff':
       return s.gamesWon - s.gamesLost
     case 'pointDiff':
@@ -470,16 +509,49 @@ function unresolved(
 ): RankedEntry[] {
   const action = ctx.rule.unresolvedAction
 
-  if (action === 'SHARED_RANK') {
-    return tied.map((id) => {
+  const sharedRank = (ids: string[], rank: number, why: string): RankedEntry[] =>
+    ids.map((id) => {
       const s = overall.get(id) ?? emptyStats(id)
-      return {
-        rank: startRank,
-        entryId: id,
-        stats: s,
-        reason: `${recordText(s)}。すべての基準で並んだため同順位としました`,
-      }
+      return { rank, entryId: id, stats: s, reason: `${recordText(s)}。${why}` }
     })
+
+  if (action === 'SHARED_RANK') {
+    return sharedRank(tied, startRank, 'すべての基準で並んだため同順位としました')
+  }
+
+  // 「上記◯〜◯で決まらない場合は当事者同士で勝った方」。
+  // criteria を全部使い切ってから、最後にだけ当該者間の勝敗を見る。
+  // ここでも決まらなければ同順位にする。要項がそれ以上を定めていないため、
+  // 勝手に乱数で並べ替えると運営が説明できなくなる。
+  if (action === 'HEAD_TO_HEAD') {
+    const subset = aggregate(ctx, tied, true)
+    const split = groupByMetric(subset, 'wins')
+    if (split !== null && split.length >= 2) {
+      const out: RankedEntry[] = []
+      let cursor = startRank
+      for (const [gi, g] of split.entries()) {
+        if (g.members.length === 1) {
+          const s = g.members[0]
+          const full = overall.get(s.entryId) ?? s
+          const verb = gi === 0 ? '勝っていた' : gi === split.length - 1 ? '負けていた' : 'でした'
+          const reason =
+            `${recordText(full)}。${tiedLabel(tied.length)}が全基準で並んだため、` +
+            `当事者同士の対戦で比べ、${g.value}勝で${verb}ため この順位です`
+          out.push(fixed(s, cursor, overall, reason))
+        } else {
+          out.push(
+            ...sharedRank(
+              g.members.map((s) => s.entryId),
+              cursor,
+              '当事者同士の対戦でも並んだため同順位としました',
+            ),
+          )
+        }
+        cursor += g.members.length
+      }
+      return out
+    }
+    return sharedRank(tied, startRank, '当事者同士の対戦でも決まらなかったため同順位としました')
   }
 
   if (action === 'PLAYOFF') {

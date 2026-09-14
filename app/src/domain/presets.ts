@@ -357,6 +357,20 @@ export const RANKING_PRESETS: RankingPreset[] = [
   },
   {
     ...baseRanking,
+    presetId: 'team-league-aichi',
+    label: '勝敗 → マッチ率 → ゲーム率 → ポイント率（決まらねば当事者同士）',
+    wording:
+      '勝敗による。以下、マッチ得失率・ゲーム得失率・ポイント得失率による。' +
+      'これらで決まらない場合は当事者同士で勝った方を上位とする',
+    // 団体戦リーグの標準形。愛知県社会人クラブリーグ 内規14 の文面そのまま。
+    // マッチ率が入るのは「2複1単で1対戦=3マッチ」という団体戦の数え方があるため。
+    criteria: ['matchRatio', 'gameRatio', 'pointRatio'],
+    tiebreakScope: 'ALL_MATCHES',
+    // 「上記で決まらない場合は当事者同士で勝った方」。最後の砦としてだけ当該者間を見る。
+    unresolvedAction: 'HEAD_TO_HEAD',
+  },
+  {
+    ...baseRanking,
     presetId: 'points-based',
     label: '勝点 → マッチ率 → ゲーム率',
     wording: '勝点（勝1・負0・棄権-1）による',

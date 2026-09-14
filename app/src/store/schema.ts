@@ -47,6 +47,11 @@ export interface EventRecord {
   discipline: 'MS' | 'WS' | 'MD' | 'WD' | 'XD' | 'TEAM'
   category: string
   entryType: 'INDIVIDUAL' | 'PAIR' | 'TEAM'
+  /**
+   * 団体戦のオーダー構成 id（`TEAM_LINEUP_PRESETS`）。個人戦では null。
+   * 1対戦を何試合に分けるかがここで決まる。
+   */
+  teamLineupId?: string | null
   /** null なら大会の既定値を継承。 */
   scoringRuleId: string | null
   rankingRulePresetId: string | null
@@ -66,6 +71,8 @@ export interface StageRecord {
   truncate: boolean
   options: {
     bracketSize?: number
+    /** トーナメントの抽選シード。記録しておかないと同じドローを再現できない。 */
+    drawSeed?: number
     thirdPlaceMatch?: boolean
     carryOverResults?: boolean
     carryOverScope?: 'MATCH_RESULT_ONLY' | 'FULL_STATS'

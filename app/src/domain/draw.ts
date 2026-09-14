@@ -432,3 +432,92 @@ export function roundsAreDisjoint(pairings: Pairing[], perRound: number): boolea
   }
   return true
 }
+
+// ---------------------------------------------------------------------------
+// トーナメント：試合ツリーの組み立て
+// ---------------------------------------------------------------------------
+
+/** ドロー表の1試合ぶん。id は呼び出し側が振る前提で、ここでは添字で表す。 */
+export interface BracketMatch {
+  /** 1回戦が 1。 */
+  round: number
+  /** そのラウンドの中の位置。1 始まり。 */
+  slotInRound: number
+  /** 入る2者。BYE と未確定は null。 */
+  entryIds: (string | null)[]
+  /** この試合の勝者が進む試合。決勝は null。 */
+  next: { round: number; slotInRound: number } | null
+  /**
+   * 相手が BYE のため、実施せずに勝ち上がる試合。
+   *
+   * **不戦勝として1勝に数える**が、ゲーム率・得点率の分母には入れない。
+   * 対戦相手が存在しないので比較のしようがない（docs/05）。
+   */
+  isBye: boolean
+}
+
+/**
+ * ドローの枠から試合ツリーを組み立てる。
+ *
+ * 1回戦は隣り合う2枠を突き合わせ、以降は勝者を半分ずつ集める。
+ * **BYE の枠と当たった試合は実施しない。**その枠の相手がそのまま2回戦に入る。
+ *
+ * 実データ（愛知県新人大会 12ドロー）では、131人が256のドローに入って
+ * 1回戦がわずか2試合、という形が普通に出てくる。BYE は例外ではなく前提。
+ */
+export function buildBracketMatches(slots: BracketSlot[]): BracketMatch[] {
+  const size = slots.length
+  if (size < 2 || (size & (size - 1)) !== 0) {
+    throw new Error(`ドローの枠数は2の冪でなければなりません: ${size}`)
+  }
+  const rounds = Math.log2(size)
+  const out: BracketMatch[] = []
+
+  // 1回戦。BYE と当たった枠はそのまま2回戦へ送る。
+  let carried: (string | null)[] = []
+  for (let i = 0; i < size; i += 2) {
+    const a = slots[i]
+    const b = slots[i + 1]
+    const slotInRound = i / 2 + 1
+    const next = rounds > 1 ? { round: 2, slotInRound: Math.ceil(slotInRound / 2) } : null
+    const bye = a.isBye || b.isBye
+    out.push({
+      round: 1,
+      slotInRound,
+      entryIds: [a.entryId, b.entryId],
+      next,
+      isBye: bye,
+    })
+    carried.push(bye ? (a.isBye ? b.entryId : a.entryId) : null)
+  }
+
+  // 2回戦以降。BYE で上がってきた者だけ、最初から埋まった状態で置く。
+  for (let r = 2; r <= rounds; r++) {
+    const n = size / 2 ** r
+    const prev = carried
+    carried = []
+    for (let i = 0; i < n; i++) {
+      const slotInRound = i + 1
+      const next = r < rounds ? { round: r + 1, slotInRound: Math.ceil(slotInRound / 2) } : null
+      out.push({
+        round: r,
+        slotInRound,
+        entryIds: [prev[i * 2] ?? null, prev[i * 2 + 1] ?? null],
+        next,
+        isBye: false,
+      })
+      carried.push(null)
+    }
+  }
+
+  return out
+}
+
+/** ラウンドの呼び方。決勝から遡って数える。 */
+export function roundLabel(round: number, rounds: number): string {
+  const fromEnd = rounds - round
+  if (fromEnd === 0) return '決勝'
+  if (fromEnd === 1) return '準決勝'
+  if (fromEnd === 2) return '準々決勝'
+  return `${round}回戦`
+}

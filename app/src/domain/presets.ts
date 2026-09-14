@@ -3,7 +3,7 @@
 // 運営者に個別項目を設定させないための一覧。点数はここにしか現れない。
 // ドメイン層の他のファイルに 15 / 17 / 21 / 30 を直接書いてはならない（docs/adr/0005）。
 
-import type { RankingRuleSet, ScoringRuleSet } from './types'
+import type { RankingRuleSet, ScoringRuleSet, LineupSlot, TeamLineup } from './types'
 
 export interface ScoringPreset extends ScoringRuleSet {
   label: string
@@ -398,4 +398,64 @@ export function defaultRankingRule(): RankingRuleSet {
   if (!p) throw new Error(`既定の順位決定プリセットが見つかりません: ${DEFAULT_RANKING_PRESET_ID}`)
   const { label: _l, wording: _w, ...rule } = p
   return rule
+}
+
+// ---------------------------------------------------------------------------
+// 団体戦のオーダー構成
+// ---------------------------------------------------------------------------
+
+const d = (label: string, discipline: LineupSlot['discipline']): LineupSlot => ({ label, discipline })
+
+/**
+ * 団体戦の構成。**数も種別も要項ごとに違う**ので、選べる形にしてある。
+ *
+ * 並び順がそのまま試合順になる。愛知の社会人リーグは「複・単・複」の順で、
+ * 第1ダブルスと第2ダブルスのあいだにシングルスが入る。
+ * 1人が複数の枠に出られるかどうかは要項の話で、ここでは縛らない。
+ */
+export const TEAM_LINEUP_PRESETS: TeamLineup[] = [
+  {
+    id: '2d1s',
+    label: '2複1単（複・単・複）',
+    slots: [d('第1ダブルス', 'MD'), d('シングルス', 'MS'), d('第2ダブルス', 'MD')],
+  },
+  {
+    id: '3d',
+    label: '3複',
+    slots: [d('第1ダブルス', 'MD'), d('第2ダブルス', 'MD'), d('第3ダブルス', 'MD')],
+  },
+  {
+    id: '2s1d',
+    label: '2単1複（単・複・単）',
+    slots: [d('第1シングルス', 'MS'), d('ダブルス', 'MD'), d('第2シングルス', 'MS')],
+  },
+  {
+    id: '3s2d',
+    label: '3単2複',
+    slots: [
+      d('第1シングルス', 'MS'),
+      d('第2シングルス', 'MS'),
+      d('第3シングルス', 'MS'),
+      d('第1ダブルス', 'MD'),
+      d('第2ダブルス', 'MD'),
+    ],
+  },
+  {
+    id: '2d1s-mix',
+    label: '混合2複1単',
+    slots: [d('男子ダブルス', 'MD'), d('混合ダブルス', 'XD'), d('女子ダブルス', 'WD')],
+  },
+]
+
+/** 愛知の社会人リーグ（男女一般）と同じ。最も広く使われている形。 */
+export const DEFAULT_TEAM_LINEUP_ID = '2d1s'
+
+export function findTeamLineup(id: string): TeamLineup | undefined {
+  return TEAM_LINEUP_PRESETS.find((x) => x.id === id)
+}
+
+export function defaultTeamLineup(): TeamLineup {
+  const x = findTeamLineup(DEFAULT_TEAM_LINEUP_ID)
+  if (!x) throw new Error(`既定のオーダー構成が見つかりません: ${DEFAULT_TEAM_LINEUP_ID}`)
+  return x
 }

@@ -3,13 +3,14 @@
 // すべての書き込みは操作ログを残し、Undo できる（UX原則3）。
 // 確認ダイアログで守らない。取り消せることで確認の必要をなくす。
 
-import { splitIntoGroups } from '../domain/draw'
+import { buildBracket, buildBracketMatches, splitIntoGroups } from '../domain/draw'
 import {
   defaultRankingRule,
   findRankingPreset,
   findScoringPreset,
   DEFAULT_RANKING_PRESET_ID,
   DEFAULT_SCORING_PRESET_ID,
+  findTeamLineup,
 } from '../domain/presets'
 import { rank, type RankingContext } from '../domain/ranking'
 import { buildSchedule, type ScheduleBlock, type ScheduleOptions } from '../domain/schedule'
@@ -270,9 +271,14 @@ export async function buildMatches(
     (a, b) => a.order - b.order,
   )
 
+  // ステージの形式で組み方が変わる。
+  // リーグは総当たりを時間割に流し込む。トーナメントはドロー表から試合ツリーを組む。
+  const roundRobin = stages.filter((st) => st.type !== 'SINGLE_ELIMINATION')
+  const knockout = stages.filter((st) => st.type === 'SINGLE_ELIMINATION')
+
   const blocks: ScheduleBlock[] = []
   const stageOfBlock = new Map<string, StageRecord>()
-  for (const st of stages) {
+  for (const st of roundRobin) {
     const ev = eventById.get(st.eventId)
     for (const g of allGroups.filter((x) => x.stageId === st.id)) {
       blocks.push({
@@ -286,33 +292,114 @@ export async function buildMatches(
   }
 
   const scheduled = buildSchedule(blocks, opts)
-  const matches: MatchRecord[] = scheduled.map((s) => {
+
+  // 団体戦では、組合せが決めるのは**対戦（チーム対チーム）**であって試合ではない。
+  // 1対戦がオーダー構成の枠数ぶんの試合に分かれる。2複1単なら3試合。
+  // 同じ対戦の試合は同じコート・同じ時刻に置き、`tieId` で束ねる。
+  // 集計はこの `tieId` を見て「勝敗は対戦単位、マッチ得失はマッチ単位」を分ける。
+  let seq = 0
+  const matches: MatchRecord[] = []
+  for (const s of scheduled) {
     const st = stageOfBlock.get(s.blockId) as StageRecord
-    return {
-      id: newId('m'),
-      tournamentId,
-      eventId: st.eventId,
-      stageId: st.id,
-      groupId: s.blockId,
-      tieId: null,
-      number: s.number,
-      numberInGroup: s.numberInGroup,
-      round: s.round,
-      slotInRound: s.court,
-      entryIds: [s.entryIds[0], s.entryIds[1]],
-      status: 'READY',
-      resultType: 'NORMAL',
-      games: [],
-      winnerEntryId: null,
-      retiredEntryId: null,
-      scoringRuleId: s.scoringRuleId,
-      courtId: `c${s.court}`,
-      scheduledAt: s.scheduledAt,
-      completedAt: null,
-      nextMatchId: null,
-      loserNextMatchId: null,
+    const ev = eventById.get(st.eventId)
+    const lineup = ev?.entryType === 'TEAM' ? findTeamLineup(ev.teamLineupId ?? '')?.slots : undefined
+    const slots = lineup && lineup.length > 0 ? lineup : [null]
+    const tieId = slots.length > 1 ? newId('tie') : null
+
+    for (const slot of slots) {
+      matches.push({
+        id: newId('m'),
+        tournamentId,
+        eventId: st.eventId,
+        stageId: st.id,
+        groupId: s.blockId,
+        tieId,
+        // 通し番号は試合ごとに振り直す。団体戦では対戦の中の3試合が連番になる。
+        number: ++seq,
+        numberInGroup: s.numberInGroup,
+        round: s.round,
+        slotInRound: s.court,
+        entryIds: [s.entryIds[0], s.entryIds[1]],
+        status: 'READY',
+        resultType: 'NORMAL',
+        games: [],
+        winnerEntryId: null,
+        retiredEntryId: null,
+        scoringRuleId: s.scoringRuleId,
+        courtId: `c${s.court}`,
+        scheduledAt: s.scheduledAt,
+        completedAt: null,
+        nextMatchId: null,
+        loserNextMatchId: null,
+        lineupSlot: slot?.label ?? null,
+      })
     }
-  })
+  }
+
+  // トーナメント。ドロー表を作り、勝ち上がりを結線する。
+  // 時間割には流し込まない。**1回戦が終わらないと2回戦の相手が決まらない**ので、
+  // 先に時刻を割り当てても意味がなく、かえって「予定どおりに進まない表」を生む。
+  const entriesByEvent = new Map<string, EntryRecord[]>()
+  for (const st of knockout) {
+    const ev = eventById.get(st.eventId)
+    const groups = allGroups.filter((x) => x.stageId === st.id)
+    for (const g of groups) {
+      if (!entriesByEvent.has(st.eventId)) {
+        entriesByEvent.set(st.eventId, await d.entries.where({ eventId: st.eventId }).toArray())
+      }
+      const all = entriesByEvent.get(st.eventId) ?? []
+      const members = g.entryIds.map((id) => all.find((e) => e.id === id)).filter((e) => !!e)
+      if (members.length < 2) continue
+
+      const drawSlots = buildBracket(members, {
+        drawSeed: st.options.drawSeed ?? 1,
+        size: st.options.bracketSize,
+      })
+      const tree = buildBracketMatches(drawSlots)
+      const scoringRuleId = effectiveScoringRuleId(t, ev, st, g)
+      const lineup =
+        ev?.entryType === 'TEAM' ? findTeamLineup(ev.teamLineupId ?? '')?.slots : undefined
+      const slotsPerTie = lineup && lineup.length > 0 ? lineup : [null]
+
+      // 勝ち上がり先を引けるように、先に id を決めておく。
+      const idOf = new Map<string, string>()
+      for (const bm of tree) idOf.set(`${bm.round}-${bm.slotInRound}`, newId('m'))
+
+      for (const bm of tree) {
+        const tieId = slotsPerTie.length > 1 ? newId('tie') : null
+        const nextId = bm.next ? (idOf.get(`${bm.next.round}-${bm.next.slotInRound}`) ?? null) : null
+        for (const [k, slot] of slotsPerTie.entries()) {
+          const both = bm.entryIds[0] !== null && bm.entryIds[1] !== null
+          matches.push({
+            id: k === 0 ? (idOf.get(`${bm.round}-${bm.slotInRound}`) as string) : newId('m'),
+            tournamentId,
+            eventId: st.eventId,
+            stageId: st.id,
+            groupId: g.id,
+            tieId,
+            number: ++seq,
+            numberInGroup: bm.slotInRound,
+            round: bm.round,
+            slotInRound: bm.slotInRound,
+            entryIds: [bm.entryIds[0], bm.entryIds[1]],
+            // 相手が BYE の枠は、実施せずに勝ち上がる。
+            status: bm.isBye ? 'COMPLETED' : both ? 'READY' : 'PENDING',
+            resultType: bm.isBye ? 'BYE' : 'NORMAL',
+            games: [],
+            winnerEntryId: bm.isBye ? (bm.entryIds.find((x) => x !== null) ?? null) : null,
+            retiredEntryId: null,
+            scoringRuleId,
+            courtId: null,
+            scheduledAt: null,
+            completedAt: null,
+            nextMatchId: nextId,
+            loserNextMatchId: null,
+            lineupSlot: slot?.label ?? null,
+          })
+        }
+      }
+    }
+  }
 
   await d.transaction('rw', [d.matches], async () => {
     await d.matches.where({ tournamentId }).delete()
@@ -388,19 +475,86 @@ export async function enterResult(
     completedAt: now(),
   }
 
+  await d.matches.put(after)
+  const advanced = await advanceWinner(after, d)
+
   const op = await writeWithLog(
     d,
     before.tournamentId,
     'MATCH_RESULT_ENTERED',
     `第${before.number}試合を記録しました`,
-    [{ table: 'matches', key: before.id, value: before }],
-    [{ table: 'matches', key: after.id, value: after }],
+    [
+      { table: 'matches', key: before.id, value: before },
+      ...(await Promise.all(
+        advanced.map(async (x) => ({
+          table: 'matches' as const,
+          key: x.id,
+          value: (await d.matches.get(x.id)) ?? x,
+        })),
+      )),
+    ],
+    [
+      { table: 'matches', key: after.id, value: after },
+      ...advanced.map((x) => ({ table: 'matches' as const, key: x.id, value: x })),
+    ],
   )
 
   return { match: after, operation: op }
 }
 
 /** 入力を取り消して未入力に戻す。 */
+/**
+ * トーナメントで、勝者を次の試合の枠に入れる。
+ *
+ * 団体戦では対戦（Tie）の中の1試合が終わっただけでは勝ち上がりが決まらない。
+ * **同じ Tie の過半数を取った側**が勝ち上がる。2複1単なら2試合先取。
+ *
+ * 戻り値は書き換えが必要になった試合。呼び出し側が操作ログと一緒に保存する。
+ */
+async function advanceWinner(m: MatchRecord, d: BadmintonDb): Promise<MatchRecord[]> {
+  if (!m.nextMatchId) return []
+
+  let winner = m.winnerEntryId
+  if (m.tieId) {
+    const siblings = (await d.matches.where({ tournamentId: m.tournamentId }).toArray()).filter(
+      (x) => x.tieId === m.tieId,
+    )
+    const need = Math.floor(siblings.length / 2) + 1
+    const tally = new Map<string, number>()
+    for (const x of siblings) {
+      if (!x.winnerEntryId) continue
+      tally.set(x.winnerEntryId, (tally.get(x.winnerEntryId) ?? 0) + 1)
+    }
+    winner = [...tally.entries()].find(([, n]) => n >= need)?.[0] ?? null
+  }
+
+  const next = await d.matches.get(m.nextMatchId)
+  if (!next) return []
+
+  // 奇数番の試合の勝者が上の枠、偶数番が下の枠に入る。
+  const side = m.slotInRound % 2 === 1 ? 0 : 1
+  const group = next.tieId
+    ? (await d.matches.where({ tournamentId: m.tournamentId }).toArray()).filter(
+        (x) => x.tieId === next.tieId,
+      )
+    : [next]
+
+  const out: MatchRecord[] = []
+  for (const target of group) {
+    const ids = [...target.entryIds]
+    // winner が null のときは枠を空ける（結果を取り消したとき）。
+    if (ids[side] === winner) continue
+    ids[side] = winner
+    const both = ids[0] !== null && ids[1] !== null
+    out.push({
+      ...target,
+      entryIds: ids,
+      status: target.status === 'COMPLETED' ? target.status : both ? 'READY' : 'PENDING',
+    })
+  }
+  return out
+}
+
 export async function clearResult(
   matchId: string,
   d: BadmintonDb = db(),
@@ -418,13 +572,30 @@ export async function clearResult(
     completedAt: null,
   }
 
+  // トーナメントでは、取り消しは次の試合まで波及する。
+  // 消し忘れると、もう存在しない勝者が2回戦に残ったままになる。
+  await d.matches.put(after)
+  const reverted = await advanceWinner(after, d)
+
   const op = await writeWithLog(
     d,
     before.tournamentId,
     'MATCH_RESULT_CLEARED',
     `第${before.number}試合の結果を取り消しました`,
-    [{ table: 'matches', key: before.id, value: before }],
-    [{ table: 'matches', key: after.id, value: after }],
+    [
+      { table: 'matches', key: before.id, value: before },
+      ...(await Promise.all(
+        reverted.map(async (x) => ({
+          table: 'matches' as const,
+          key: x.id,
+          value: (await d.matches.get(x.id)) ?? x,
+        })),
+      )),
+    ],
+    [
+      { table: 'matches', key: after.id, value: after },
+      ...reverted.map((x) => ({ table: 'matches' as const, key: x.id, value: x })),
+    ],
   )
   return { match: after, operation: op }
 }

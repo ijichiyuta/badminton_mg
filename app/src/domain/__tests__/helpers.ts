@@ -30,6 +30,7 @@ export interface MkOptions {
   winnerEntryId?: string | null
   status?: Match['status']
   tieId?: string | null
+  lineupSlot?: string | null
 }
 
 /** テスト用の Match を作る。勝者はスコアから自動判定する。 */
@@ -55,6 +56,7 @@ export function mk(
     stageId: 's1',
     groupId: 'g1',
     tieId: opts.tieId ?? null,
+    lineupSlot: opts.lineupSlot ?? null,
     number: seq,
     numberInGroup: seq,
     round: 1,

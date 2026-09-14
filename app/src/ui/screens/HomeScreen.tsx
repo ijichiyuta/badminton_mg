@@ -11,12 +11,20 @@ interface Props {
   idx: Indexes
   courtCount: number
   onOpenMatch: (m: MatchRecord) => void
+  save: {
+    supported: boolean
+    linked: boolean
+    fileName: string | null
+    lastWrittenAt: string | null
+  }
+  onChooseFile: () => void
+  onExport: () => void
 }
 
 /** 結果が入っていないまま時間が経った試合とみなす閾値（枠数）。 */
 const STALE_SLOTS = 1
 
-export function HomeScreen({ matches, idx, courtCount, onOpenMatch }: Props) {
+export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChooseFile, onExport }: Props) {
   const done = matches.filter((m) => m.status === 'COMPLETED')
   const pending = matches.filter((m) => m.status !== 'COMPLETED')
 
@@ -75,6 +83,51 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch }: Props) {
           )}
         </>
       )}
+
+      <Section
+        title="データ保全"
+        note={save.linked ? 'ファイルに自動保存中' : '保存先が未設定'}
+        warn={!save.linked}
+      >
+        {save.linked ? (
+          <div className="text-sm">
+            <div className="flex items-baseline gap-2">
+              <span className="text-ok">✓</span>
+              <span className="min-w-0 truncate font-medium">{save.fileName}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-ink-2">
+              1試合入力するたびに自動で書き込んでいます
+              {save.lastWrittenAt && ` · 最終 ${save.lastWrittenAt.slice(11, 16)}`}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm">
+            <p className="mb-2 text-ink-2">
+              {save.supported
+                ? 'いまのデータはブラウザの中だけにあります。保存先のファイルを決めると、1試合ごとに自動で書き込みます。'
+                : 'このブラウザはファイルへの自動保存に対応していません（Chrome / Edge なら対応）。ときどき書き出してください。'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {save.supported && (
+                <button
+                  onClick={onChooseFile}
+                  className="rounded bg-primary px-4 font-bold text-paper"
+                  style={{ minHeight: 44 }}
+                >
+                  保存先を決める
+                </button>
+              )}
+              <button
+                onClick={onExport}
+                className="rounded border border-rule px-4"
+                style={{ minHeight: 44 }}
+              >
+                いま書き出す
+              </button>
+            </div>
+          </div>
+        )}
+      </Section>
 
       <Section title="進捗" note={`${done.length} / ${matches.length} 試合`}>
         <div className="flex flex-col gap-1.5">

@@ -7,18 +7,20 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { HomeScreen } from './ui/screens/HomeScreen'
 import { InputScreen } from './ui/screens/InputScreen'
 import { StandingsScreen } from './ui/screens/StandingsScreen'
+import { PrintScreen } from './ui/screens/PrintScreen'
 import { TimetableScreen } from './ui/screens/TimetableScreen'
 import { useApp, useIndexes } from './ui/useApp'
 import type { MatchRecord } from './store/schema'
 import type { Game } from './domain/types'
 
-type Tab = 'home' | 'input' | 'standings' | 'timetable'
+type Tab = 'home' | 'input' | 'standings' | 'timetable' | 'print'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'home', label: 'ホーム' },
   { id: 'input', label: '入力' },
   { id: 'standings', label: '星取表' },
   { id: 'timetable', label: '進行' },
+  { id: 'print', label: '印刷' },
 ]
 
 type TextSize = 'small' | 'normal' | 'large'
@@ -123,7 +125,15 @@ export default function App() {
 
       <main className="min-h-0 flex-1">
         {tab === 'home' && (
-          <HomeScreen matches={matches} idx={idx} courtCount={courtCount} onOpenMatch={openMatch} />
+          <HomeScreen
+            matches={matches}
+            idx={idx}
+            courtCount={courtCount}
+            onOpenMatch={openMatch}
+            save={app.saveState}
+            onChooseFile={() => void app.chooseFile()}
+            onExport={() => void app.exportFile()}
+          />
         )}
         {tab === 'input' &&
           (current && rule ? (
@@ -158,6 +168,15 @@ export default function App() {
             onOpenMatch={openMatch}
           />
         )}
+        {tab === 'print' && (
+          <PrintScreen
+            tournament={t}
+            groups={app.data.groups}
+            matches={matches}
+            rules={app.data.scoringRules}
+            idx={idx}
+          />
+        )}
       </main>
 
       {/* Undo トースト。確認ダイアログの代わり。5秒で消す */}
@@ -171,7 +190,7 @@ export default function App() {
         />
       )}
 
-      <nav className="grid grid-cols-4 border-t border-rule no-print">
+      <nav className="grid grid-cols-5 border-t border-rule no-print">
         {TABS.map((x) => (
           <button
             key={x.id}

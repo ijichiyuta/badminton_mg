@@ -58,8 +58,19 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; touch-action: 
 }
 
 /* 印刷。紙は一級市民（UX原則7）。 */
+@page { size: A4 landscape; margin: 8mm; }
+
 @media print {
   .no-print { display: none !important; }
-  body { font-size: 10pt; }
+  html, body, #root { height: auto; }
+  body { font-size: 9pt; background: #fff; }
+  /* 画面のレイアウト制約を解く。紙は縦に伸びる */
+  .print-root { padding: 0 !important; }
+  main { overflow: visible !important; }
+  /* 1つの出力物＝1ページ。最後の余分な改ページは出さない */
   .print-page { break-after: page; }
+  .print-page:last-child { break-after: auto; }
+  /* 表を途中で切らない */
+  table { break-inside: avoid; }
+  tr { break-inside: avoid; }
 }

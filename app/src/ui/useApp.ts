@@ -12,6 +12,17 @@ import {
   undo as undoUseCase,
 } from '../store/usecases'
 import { ensureDemo, resetDemo } from './demo'
+import { snapshot } from '../store/db'
+import {
+  downloadSnapshot,
+  fileSaveStatus,
+  isFileSaveSupported,
+  linkFile,
+  requestPersistentStorage,
+  suggestedFileName,
+  writeSnapshot,
+  type FileSaveStatus,
+} from '../store/fileSave'
 import type {
   EventRecord,
   GroupRecord,
@@ -43,6 +54,12 @@ export function useApp() {
   const [data, setData] = useState<AppData | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<FileSaveStatus>(() => fileSaveStatus())
+
+  // 容量不足による自動削除から守る。1行で済むので必ず呼ぶ。
+  useEffect(() => {
+    void requestPersistentStorage()
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -76,14 +93,51 @@ export function useApp() {
     void load()
   }, [load])
 
+  /**
+   * 保存先のファイルへ書き出す。
+   * **失敗しても画面を止めない**（N-2-3）。状態表示だけが変わる。
+   */
+  const syncFile = useCallback(async (tournamentId: string) => {
+    if (!isFileSaveSupported()) return
+    try {
+      const snap = await snapshot(tournamentId)
+      await writeSnapshot(snap)
+    } catch {
+      // 握りつぶす。保存先が未設定なら何もしない。
+    }
+    setSaveState(fileSaveStatus())
+  }, [])
+
   const enterResult = useCallback(
     async (matchId: string, games: Game[], resultType: ResultType = 'NORMAL') => {
       const { operation } = await enterResultUseCase({ matchId, games, resultType })
       await load()
       setToast({ message: operation.label, operationId: operation.id })
+      const d = db()
+      const m = await d.matches.get(matchId)
+      if (m) void syncFile(m.tournamentId)
     },
-    [load],
+    [load, syncFile],
   )
+
+  /** 保存先を選ぶ。1回だけ。以降は黙って上書きする。 */
+  const chooseFile = useCallback(async () => {
+    if (!data) return
+    const ok = await linkFile(suggestedFileName(data.tournament.name, data.tournament.date))
+    setSaveState(fileSaveStatus())
+    if (ok) {
+      await syncFile(data.tournament.id)
+      setToast({ message: 'ファイルに自動保存します', operationId: null })
+    }
+  }, [data, syncFile])
+
+  /** File System Access API が使えない環境向け。 */
+  const exportFile = useCallback(async () => {
+    if (!data) return
+    const snap = await snapshot(data.tournament.id)
+    downloadSnapshot(snap, suggestedFileName(data.tournament.name, data.tournament.date))
+    setToast({ message: '書き出しました', operationId: null })
+  }, [data])
 
   const clearResult = useCallback(
     async (matchId: string) => {
@@ -120,7 +174,22 @@ export function useApp() {
     [],
   )
 
-  return { data, toast, setToast, error, enterResult, clearResult, undo, undoLast, reset, getStandings, reload: load }
+  return {
+    data,
+    toast,
+    setToast,
+    error,
+    saveState,
+    enterResult,
+    clearResult,
+    undo,
+    undoLast,
+    reset,
+    chooseFile,
+    exportFile,
+    getStandings,
+    reload: load,
+  }
 }
 
 // ---------------------------------------------------------------------------

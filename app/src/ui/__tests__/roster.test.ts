@@ -133,3 +133,36 @@ describe('所属の表記ゆれ', () => {
     expect(findAffiliationVariants(rows)).toEqual([])
   })
 })
+
+describe('所属の表記ゆれ（実際の名簿で起きる形）', () => {
+  // 表記ゆれの判定だけを見る。列の推定を挟むと、そちらの都合で結果が変わってしまう。
+  const v = (...affs: string[]) =>
+    findAffiliationVariants(affs.map((affiliation) => ({ playerNames: ['甲'], affiliation, seed: null })))
+
+  it('全角カナと半角カナの違いを見つける', () => {
+    expect(v('あおぞらクラブ', 'あおぞらｸﾗﾌﾞ')).toHaveLength(1)
+  })
+
+  it('英数字の全角半角の違いを見つける', () => {
+    expect(v('ＲＳＮＯＡＮＡＫＡ', 'RSNOANAKA')).toHaveLength(1)
+  })
+
+  it('空白や中黒の有無を吸収する', () => {
+    expect(v('Ｂｅ Ｓｔｒｏｎｇ Ｊｒ．', 'BeStrongJr.')).toHaveLength(1)
+  })
+
+  it('末尾が少し違うだけのものも見つける', () => {
+    expect(v('振甫クラブ', '振甫クラブA')).toHaveLength(1)
+  })
+
+  it('**別団体を誤って揺れと判定しない**', () => {
+    expect(v('しらかば', 'かえで会', 'あおぞら')).toHaveLength(0)
+  })
+
+  it('名簿の取り込み結果に警告として出る', () => {
+    const r = parseRoster(
+      '山田 太郎\t鈴木 一郎\tあおぞらクラブ\n佐藤 次郎\t高橋 三郎\tあおぞらｸﾗﾌﾞ',
+    )
+    expect(r.warnings.some((w) => w.includes('所属の書き方が揺れています'))).toBe(true)
+  })
+})

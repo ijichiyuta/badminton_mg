@@ -144,6 +144,11 @@ export function parseRoster(text: string, override?: ColumnRole[]): ParseResult 
     warnings.push(`同じ氏名が複数あります：${dup.slice(0, 3).join('、')}${dup.length > 3 ? ' ほか' : ''}`)
   }
 
+  // 所属の表記ゆれ。見つけて伝えないと、別団体として集計されてしまう。
+  for (const [a, b] of findAffiliationVariants(rows).slice(0, 3)) {
+    warnings.push(`所属の書き方が揺れています：「${a}」と「${b}」`)
+  }
+
   return { rows, warnings, columns }
 }
 
@@ -151,6 +156,20 @@ export function parseRoster(text: string, override?: ColumnRole[]): ParseResult 
  * 所属名の表記ゆれを見つける（F-2-6）。
  * 「〇〇高校」と「〇〇高」のような組を候補として返す。
  */
+/**
+ * 所属名の表記ゆれを見つける。
+ *
+ * 現場の名簿では同じ団体が違う書き方で並ぶ。全角と半角、カナの幅、
+ * 「クラブ」と「ｸﾗﾌﾞ」、括弧の種類。**これを人が目で探すのが地味に重い**（docs/13 O-1）。
+ *
+ * 判定は2段構え。
+ *   1. NFKC で正規化し、空白と中黒を落として一致するか（幅・カナの違いを吸収する）
+ *   2. 片方がもう片方の前方一致で、差が2文字以内か（「〇〇」と「〇〇A」）
+ */
+function normalizeAffiliation(s: string): string {
+  return s.normalize('NFKC').replace(/[\s・･]/g, '').toLowerCase()
+}
+
 export function findAffiliationVariants(rows: ParsedRow[]): [string, string][] {
   const names = [...new Set(rows.map((r) => r.affiliation).filter((a) => a !== ''))]
   const out: [string, string][] = []
@@ -159,7 +178,10 @@ export function findAffiliationVariants(rows: ParsedRow[]): [string, string][] {
       const a = names[i]
       const b = names[j]
       if (a === b) continue
-      // 片方がもう片方の前方一致で、差が2文字以内。
+      if (normalizeAffiliation(a) === normalizeAffiliation(b)) {
+        out.push([a, b])
+        continue
+      }
       const [s, l] = a.length <= b.length ? [a, b] : [b, a]
       if (l.startsWith(s) && l.length - s.length <= 2) out.push([a, b])
     }

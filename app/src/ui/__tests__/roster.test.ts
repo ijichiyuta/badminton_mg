@@ -116,9 +116,9 @@ describe('inferColumns', () => {
 describe('所属の表記ゆれ', () => {
   it('「○○高校」と「○○高」を候補に出す', () => {
     const rows = [
-      { affiliation: '名古屋高校', playerNames: ['a'], seed: null },
-      { affiliation: '名古屋高', playerNames: ['b'], seed: null },
-      { affiliation: '豊田クラブ', playerNames: ['c'], seed: null },
+      { affiliation: '名古屋高校', playerNames: ['a'], seed: null, group: null },
+      { affiliation: '名古屋高', playerNames: ['b'], seed: null, group: null },
+      { affiliation: '豊田クラブ', playerNames: ['c'], seed: null, group: null },
     ]
     const v = findAffiliationVariants(rows)
     expect(v).toHaveLength(1)
@@ -127,8 +127,8 @@ describe('所属の表記ゆれ', () => {
 
   it('関係ない名前は候補にしない', () => {
     const rows = [
-      { affiliation: 'あおぞら', playerNames: ['a'], seed: null },
-      { affiliation: 'みどり台', playerNames: ['b'], seed: null },
+      { affiliation: 'あおぞら', playerNames: ['a'], seed: null, group: null },
+      { affiliation: 'みどり台', playerNames: ['b'], seed: null, group: null },
     ]
     expect(findAffiliationVariants(rows)).toEqual([])
   })
@@ -137,7 +137,7 @@ describe('所属の表記ゆれ', () => {
 describe('所属の表記ゆれ（実際の名簿で起きる形）', () => {
   // 表記ゆれの判定だけを見る。列の推定を挟むと、そちらの都合で結果が変わってしまう。
   const v = (...affs: string[]) =>
-    findAffiliationVariants(affs.map((affiliation) => ({ playerNames: ['甲'], affiliation, seed: null })))
+    findAffiliationVariants(affs.map((affiliation) => ({ playerNames: ['甲'], affiliation, seed: null, group: null })))
 
   it('全角カナと半角カナの違いを見つける', () => {
     expect(v('あおぞらクラブ', 'あおぞらｸﾗﾌﾞ')).toHaveLength(1)
@@ -164,5 +164,66 @@ describe('所属の表記ゆれ（実際の名簿で起きる形）', () => {
       '山田 太郎\t鈴木 一郎\tあおぞらクラブ\n佐藤 次郎\t高橋 三郎\tあおぞらｸﾗﾌﾞ',
     )
     expect(r.warnings.some((w) => w.includes('所属の書き方が揺れています'))).toBe(true)
+  })
+})
+
+describe('すでに決まっている組合せを貼り付ける', () => {
+  // 申込を締め切ったあと、運営が組合せを決めて表を配る。
+  // **抽選を回すのではなく、決まったものをそのまま入れるのが実際の流れ。**
+  const 組合せ表 = [
+    'A組\t山田 太郎\t鈴木 一郎\tしらかば',
+    'A組\t佐藤 次郎\t高橋 三郎\tかえで会',
+    'A組\t田中 四郎\t伊藤 五郎\tあおぞら',
+    'B組\t渡辺 六郎\t中村 七郎\tみどり台',
+    'B組\t小林 八郎\t加藤 九郎\tつばさ',
+    'B組\t吉田 十郎\t山口 一二\tひまわり',
+  ].join('\n')
+
+  it('組の列を見分ける', () => {
+    const r = parseRoster(組合せ表)
+    expect(r.columns[0]).toBe('group')
+    expect(r.rows.map((x) => x.group)).toEqual(['A組', 'A組', 'A組', 'B組', 'B組', 'B組'])
+  })
+
+  it('氏名と所属はこれまでどおり読める', () => {
+    const r = parseRoster(組合せ表)
+    expect(r.rows[0].playerNames).toEqual(['山田 太郎', '鈴木 一郎'])
+    expect(r.rows[0].affiliation).toBe('しらかば')
+  })
+
+  it('**抽選しない旨を伝える**', () => {
+    const r = parseRoster(組合せ表)
+    expect(r.warnings.some((w) => w.includes('抽選はせず'))).toBe(true)
+    expect(r.warnings.some((w) => w.includes('A組・B組'))).toBe(true)
+  })
+
+  it('組が空の行があれば、そこだけ抽選に回すと伝える', () => {
+    const r = parseRoster(
+      [
+        'A組\t山田 太郎\t鈴木 一郎\tしらかば',
+        'B組\t佐藤 次郎\t高橋 三郎\tかえで会',
+        '\t田中 四郎\t伊藤 五郎\tあおぞら',
+      ].join('\n'),
+    )
+    expect(r.warnings.some((w) => w.includes('1 行で空'))).toBe(true)
+  })
+
+  it('「1部A」のような書き方も組とみなす', () => {
+    const r = parseRoster(
+      ['男子1部A組\t山田 太郎\t鈴木 一郎\tしらかば', '男子1部B組\t佐藤 次郎\t高橋 三郎\tかえで会'].join('\n'),
+    )
+    expect(r.rows.map((x) => x.group)).toEqual(['男子1部A組', '男子1部B組'])
+  })
+
+  it('**組の列がなければ今までどおり**。空欄を返すだけ', () => {
+    const r = parseRoster('山田 太郎\t鈴木 一郎\tしらかば\n佐藤 次郎\t高橋 三郎\tかえで会')
+    expect(r.rows.every((x) => x.group === null)).toBe(true)
+    expect(r.warnings.some((w) => w.includes('抽選はせず'))).toBe(false)
+  })
+
+  it('シードの列を組と取り違えない', () => {
+    const r = parseRoster('1\t山田 太郎\t鈴木 一郎\tしらかば\n2\t佐藤 次郎\t高橋 三郎\tかえで会')
+    expect(r.columns[0]).toBe('seed')
+    expect(r.rows.every((x) => x.group === null)).toBe(true)
   })
 })

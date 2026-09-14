@@ -245,6 +245,14 @@ export interface Entry {
   affiliation?: string
   seed: number | null
   status: EntryStatus
+  /**
+   * すでに決まっている組の名前。名簿に組の列があれば入る。
+   *
+   * **多くの大会は申込を締め切ってから運営が組合せを決め、表として配ってから当日を迎える。**
+   * その場合に必要なのは抽選ではなく、決まったものをそのまま入れる経路。
+   * ここが埋まっていれば抽選は回さない。
+   */
+  plannedGroup?: string | null
 }
 
 export interface Group {

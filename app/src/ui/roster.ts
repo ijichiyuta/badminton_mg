@@ -7,6 +7,8 @@
 // どちらも受ける。
 
 export interface ParsedRow {
+  /** 貼り付けた表に組の列があれば、その値。無ければ null。 */
+  group: string | null
   affiliation: string
   playerNames: string[]
   seed: number | null
@@ -19,7 +21,25 @@ export interface ParseResult {
   columns: ColumnRole[]
 }
 
-export type ColumnRole = 'affiliation' | 'name' | 'seed' | 'ignore'
+export type ColumnRole = 'group' | 'affiliation' | 'name' | 'seed' | 'ignore'
+
+/**
+ * 組の名前らしい値か。
+ *
+ * **すでに組合せが決まっている大会のほうが多い。**
+ * 申込を締め切ってから運営が手で決め、組合せ表として配ってから当日を迎える。
+ * その表をそのまま貼れば、抽選を回さずにその通りに組む。
+ *
+ * 「A組」「A」「1部A」「男子1部A」など、短くて種類が少ない値を組とみなす。
+ */
+function looksLikeGroup(v: string): boolean {
+  const t = v.trim()
+  if (t === '' || t.length > 12) return false
+  // **数字だけは組とみなさない。**シード順位の列と見分けが付かなくなる。
+  if (isNumeric(t)) return false
+  // 「A組」「1部A」のように組で終わるか、英字1〜2文字だけか。
+  return /組$/.test(t) || /^[A-Za-zＡ-Ｚａ-ｚ]{1,2}$/.test(t)
+}
 
 const SEP = /\t|,|\s{2,}/
 
@@ -60,19 +80,53 @@ export function inferColumns(lines: string[][]): ColumnRole[] {
     }
     const numeric = cells.filter(isNumeric).length / cells.length
     const aff = cells.filter(looksLikeAffiliation).length / cells.length
+    // 組の列は「値の種類が行数よりずっと少ない」ことで見分ける。
+    // 6行で1種類なら所属かもしれないが、24行で4種類なら組とみて間違いない。
+    const uniq = new Set(cells).size
+    // 組の指定は一部だけ空のことがある（あとで決める分を空けてある）。
+    // 空欄は判定から外し、**埋まっている値だけ**で見る。
+    const filled = lines.length
+    const groupish =
+      cells.filter(looksLikeGroup).length / cells.length > 0.9 &&
+      uniq >= 2 &&
+      uniq <= Math.max(2, filled / 2)
 
-    if (numeric > 0.8) roles.push('seed')
+    if (groupish) roles.push('group')
+    else if (numeric > 0.8) roles.push('seed')
     else if (aff > 0.4) roles.push('affiliation')
     else if (cells.filter(looksLikeName).length / cells.length > 0.5) roles.push('name')
     else roles.push('ignore')
   }
 
-  // 所属が1つも見つからなければ、先頭列を所属とみなす。
-  if (!roles.includes('affiliation') && roles.length > 1 && roles[0] === 'name') {
-    // 先頭列の重複が多ければ所属らしい（同じクラブから複数出る）。
-    const first = lines.map((l) => l[0] ?? '')
-    const uniq = new Set(first).size
-    if (uniq < first.length * 0.8) roles[0] = 'affiliation'
+  // 所属が1つも見つからないとき。
+  //
+  // 「しらかば」「あおぞら」のように、クラブ名らしい語を含まない団体名は珍しくない。
+  // そのときは**姓名の間の空白**で見分ける。「山田 太郎」には空白があり、団体名には無い。
+  // 重複の多さも手がかりになるが、少人数の名簿では全部の団体が1回ずつしか出ない。
+  if (!roles.includes('affiliation')) {
+    const nameCols = roles.map((r, i) => (r === 'name' ? i : -1)).filter((i) => i >= 0)
+    if (nameCols.length >= 3) {
+      const stat = (c: number) => {
+        const cells = lines.map((l) => l[c] ?? '').filter((x) => x !== '')
+        if (cells.length === 0) return { space: 1, uniq: 1 }
+        return {
+          space: cells.filter((x) => /[\s　]/.test(x)).length / cells.length,
+          uniq: new Set(cells).size / cells.length,
+        }
+      }
+      const stats = nameCols.map((c) => ({ c, ...stat(c) }))
+      const spacey = stats.filter((x) => x.space > 0.5).length
+      // 空白のある列が他にあるなら、空白のない列が所属。
+      const bySpace = stats.filter((x) => x.space <= 0.5)
+      if (spacey >= 2 && bySpace.length > 0) {
+        roles[bySpace[bySpace.length - 1].c] = 'affiliation'
+      } else {
+        // 空白で分からなければ、いちばん重複している列を所属とみなす。
+        let pick = stats[0]
+        for (const x of stats) if (x.uniq <= pick.uniq) pick = x
+        if (pick.uniq < 0.9) roles[pick.c] = 'affiliation'
+      }
+    }
   }
 
   return roles
@@ -86,10 +140,14 @@ export function inferColumns(lines: string[][]): ColumnRole[] {
  */
 export function parseRoster(text: string, override?: ColumnRole[]): ParseResult {
   const warnings: string[] = []
+  // **行全体を trim してはならない。**
+  // Excel から貼ると、まだ決めていない組の欄が空のまま先頭に来ることがある。
+  // 行頭のタブを落とすと列がずれて、以降の推定が全部おかしくなる。
+  // 改行と、行末の空白だけを落とす。各セルの前後の空白は splitLine が落とす。
   const lines = text
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l !== '')
+    .map((l) => l.replace(/[\s　]+$/, ''))
+    .filter((l) => l.trim() !== '')
     .map(splitLine)
 
   if (lines.length === 0) return { rows: [], warnings, columns: [] }
@@ -101,10 +159,14 @@ export function parseRoster(text: string, override?: ColumnRole[]): ParseResult 
     const names: string[] = []
     let affiliation = ''
     let seed: number | null = null
+    let group: string | null = null
 
     cells.forEach((cell, c) => {
       if (cell === '') return
       switch (columns[c]) {
+        case 'group':
+          if (group === null) group = cell.trim()
+          break
         case 'affiliation':
           if (affiliation === '') affiliation = cell
           break
@@ -121,7 +183,7 @@ export function parseRoster(text: string, override?: ColumnRole[]): ParseResult 
       warnings.push(`${i + 1}行目に氏名が見つかりません`)
       continue
     }
-    rows.push({ affiliation, playerNames: names, seed })
+    rows.push({ group, affiliation, playerNames: names, seed })
   }
 
   // 人数の揃い方を見る。ダブルスなら全行2名のはず。
@@ -142,6 +204,17 @@ export function parseRoster(text: string, override?: ColumnRole[]): ParseResult 
   const dup = [...seen.entries()].filter(([, c]) => c > 1).map(([n]) => n)
   if (dup.length > 0) {
     warnings.push(`同じ氏名が複数あります：${dup.slice(0, 3).join('、')}${dup.length > 3 ? ' ほか' : ''}`)
+  }
+
+  // 組の列があれば、抽選を回さずにその通りに組む。運営者に伝える。
+  const groups = [...new Set(rows.map((r) => r.group).filter((g): g is string => !!g))]
+  if (groups.length > 0) {
+    const missing = rows.filter((r) => !r.group).length
+    warnings.push(
+      missing === 0
+        ? `組の指定を読み取りました（${groups.join('・')}）。抽選はせず、この通りに組みます`
+        : `組の指定が ${missing} 行で空です。空の行は抽選で振り分けます`,
+    )
   }
 
   // 所属の表記ゆれ。見つけて伝えないと、別団体として集計されてしまう。

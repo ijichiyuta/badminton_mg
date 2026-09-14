@@ -170,6 +170,8 @@ export interface EntryInput {
   affiliation?: string
   teamName?: string
   seed?: number | null
+  /** すでに決まっている組の名前。入っていれば抽選を回さない。 */
+  plannedGroup?: string | null
 }
 
 /** 参加者を一括登録する。Excel からの貼り付けを想定した形。 */
@@ -203,6 +205,7 @@ export async function addEntries(
       affiliation: input.affiliation,
       seed: input.seed ?? null,
       status: 'ACTIVE',
+      plannedGroup: input.plannedGroup ?? null,
     })
   }
 
@@ -227,6 +230,32 @@ export interface BuildDrawInput {
 }
 
 /** ブロック分割を行い、組を保存する。抽選のやり直しは何度でもできる。 */
+/** 組の名前を、名簿に出てきた順に並べる。「A組・B組…」と勝手に振り直さない。 */
+function plannedGroupNames(entries: Entry[]): string[] {
+  const seen: string[] = []
+  for (const e of entries) {
+    const g = e.plannedGroup
+    if (g && !seen.includes(g)) seen.push(g)
+  }
+  // 組の指定がない人は最後にまとめる。
+  if (entries.some((e) => !e.plannedGroup)) seen.push('未定')
+  return seen
+}
+
+/** 決まっている組の通りに分ける。抽選は回さない。 */
+function groupByPlanned(entries: Entry[]): { groups: string[][]; warnings: string[] } {
+  const names = plannedGroupNames(entries)
+  const groups = names.map((n) =>
+    entries.filter((e) => (e.plannedGroup ?? '未定') === n).map((e) => e.id),
+  )
+  const warnings: string[] = []
+  const thin = names.filter((_, i) => groups[i].length < 2)
+  if (thin.length > 0) {
+    warnings.push(`1組しかいない組があります：${thin.join('・')}`)
+  }
+  return { groups, warnings }
+}
+
 export async function buildGroups(
   input: BuildDrawInput,
   d: BadmintonDb = db(),
@@ -236,11 +265,18 @@ export async function buildGroups(
 
   const entries = await d.entries.where({ eventId: stage.eventId }).toArray()
 
+  // **すでに組合せが決まっているなら、抽選を回さずにその通りに組む。**
+  // 申込を締め切ってから運営が手で決め、組合せ表を配ってから当日を迎える大会が多い。
+  // 名簿に組の列があればここが埋まっている。
+  const planned = entries.filter((e) => e.plannedGroup)
+  const usePlanned = stage.type !== 'SINGLE_ELIMINATION' && planned.length > 0
+
   // **トーナメントはブロックに割らない。**出場者全員が1つのドローに入る。
   // リーグ用の「1ブロック何組」をそのまま当てると、13人の選手権が
   // 4人ずつの小さなトーナメント4つに割れてしまう。
-  const result =
-    stage.type === 'SINGLE_ELIMINATION'
+  const result = usePlanned
+    ? groupByPlanned(entries as Entry[])
+    : stage.type === 'SINGLE_ELIMINATION'
       ? { groups: [entries.map((e) => e.id)], warnings: [] }
       : splitIntoGroups(entries as Entry[], {
           groupCount: input.groupCount,
@@ -249,6 +285,7 @@ export async function buildGroups(
           separateSameAffiliation: input.separateSameAffiliation ?? true,
           drawSeed: input.drawSeed,
         })
+  const plannedNames = usePlanned ? plannedGroupNames(entries as Entry[]) : null
 
   const groups: GroupRecord[] = result.groups.map((entryIds, i) => ({
     id: newId('gr'),
@@ -256,7 +293,11 @@ export async function buildGroups(
     eventId: stage.eventId,
     stageId: stage.id,
     order: i + 1,
-    name: stage.type === 'SINGLE_ELIMINATION' ? '本戦' : `${String.fromCharCode(0x41 + i)}組`,
+    name: plannedNames
+      ? plannedNames[i]
+      : stage.type === 'SINGLE_ELIMINATION'
+        ? '本戦'
+        : `${String.fromCharCode(0x41 + i)}組`,
     entryIds,
     scoringRuleId: null,
   }))

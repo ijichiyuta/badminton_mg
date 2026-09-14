@@ -337,6 +337,7 @@ export function useApp() {
           ev.tournamentId,
           eventId,
           rows.map((r) => ({
+            plannedGroup: r.group,
             playerNames: r.playerNames,
             affiliation: r.affiliation,
             seed: r.seed,

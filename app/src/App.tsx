@@ -267,6 +267,7 @@ function OperatorApp() {
             events={app.data.events}
             stages={app.data.stages}
             groups={app.data.groups}
+            entries={app.data.entries}
             idx={idx}
             actions={app.setupActions}
             onFinish={() => setTab('home')}

@@ -11,6 +11,7 @@ import { SCORING_PRESETS, RANKING_PRESETS, DEFAULT_SCORING_PRESET_ID, DEFAULT_RA
 import { parseRoster, type ParsedRow } from '../roster'
 import { TEAM_LINEUP_PRESETS, findTeamLineup } from '../../domain/presets'
 import type {
+  EntryRecord,
   EventRecord,
   GroupRecord,
   StageRecord,
@@ -50,12 +51,22 @@ interface Props {
   events: EventRecord[]
   stages: StageRecord[]
   groups: GroupRecord[]
+  entries: EntryRecord[]
   idx: Indexes | null
   actions: SetupActions
   onFinish: () => void
 }
 
-export function SetupScreen({ tournament, events, stages, groups, idx, actions, onFinish }: Props) {
+export function SetupScreen({
+  tournament,
+  events,
+  stages,
+  groups,
+  entries,
+  idx,
+  actions,
+  onFinish,
+}: Props) {
   const [step, setStep] = useState<Step>(tournament ? 'events' : 'tournament')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -132,6 +143,7 @@ export function SetupScreen({ tournament, events, stages, groups, idx, actions, 
           tournament={tournament}
           events={events}
           groups={groups}
+          entries={entries}
           idx={idx}
           busy={busy}
           onDraw={async (stageId, perGroup, seed) => {
@@ -682,6 +694,7 @@ function DrawStep({
   tournament,
   events,
   groups,
+  entries,
   idx,
   busy,
   onDraw,
@@ -690,6 +703,7 @@ function DrawStep({
   tournament: TournamentRecord
   events: EventRecord[]
   groups: GroupRecord[]
+  entries: EntryRecord[]
   idx: Indexes | null
   busy: boolean
   onDraw: (stageId: string, perGroup: number, seed: number) => void
@@ -698,14 +712,19 @@ function DrawStep({
   const [perGroup, setPerGroup] = useState(4)
   const [startTime, setStartTime] = useState('9:30')
   const [slotMinutes, setSlotMinutes] = useState(30)
+  const anyPlanned = entries.some((e) => e.plannedGroup)
 
   return (
     <section>
       <h2 className="mb-1 text-base font-bold">組合せを作る</h2>
       <p className="mb-3 text-xs text-ink-2">
-        抽選は何度でもやり直せます。確定するまで試合番号は振られません。
+        {anyPlanned
+          ? '名簿に組の指定があります。抽選はせず、その通りに組みます。'
+          : '抽選は何度でもやり直せます。確定するまで試合番号は振られません。'}
       </p>
 
+      {/* 組が決まっているなら、組数の指定は効かない。出しても迷わせるだけ。 */}
+      {!anyPlanned && (
       <Field label="1ブロックの組数">
         <div className="flex gap-1.5">
           {[3, 4, 5, 6].map((n) => (
@@ -718,15 +737,18 @@ function DrawStep({
           端数は大きいブロックに吸収します（62組を4組ずつなら 5組×2 + 4組×13）
         </p>
       </Field>
+      )}
 
       {events.map((ev) => {
         const gs = groups.filter((g) => g.eventId === ev.id)
+        // 名簿に組の指定があれば、抽選ではなくその通りに組む。
+        const planned = entries.some((e) => e.eventId === ev.id && e.plannedGroup)
         return (
           <div key={ev.id} className="mb-3 rounded border border-rule p-2">
             <div className="mb-1 flex items-baseline gap-2">
               <span className="font-medium">{ev.name}</span>
               <span className="text-xs text-ink-3">
-                {gs.length > 0 ? `${gs.length}ブロック` : '未抽選'}
+                {gs.length > 0 ? `${gs.length}ブロック` : planned ? '表のとおりに組めます' : '未抽選'}
               </span>
               <button
                 disabled={busy}
@@ -734,7 +756,7 @@ function DrawStep({
                 className="ml-auto rounded border border-rule px-3 text-sm"
                 style={{ minHeight: 44 }}
               >
-                {gs.length > 0 ? 'もう一度抽選' : '抽選する'}
+                {planned ? (gs.length > 0 ? '組み直す' : '表のとおりに組む') : gs.length > 0 ? 'もう一度抽選' : '抽選する'}
               </button>
             </div>
             {gs.length > 0 && idx && (

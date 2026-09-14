@@ -85,7 +85,7 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
       )}
 
       <Section
-        title="データ保全"
+        title="データの保存先"
         note={save.linked ? 'ファイルに自動保存中' : '保存先が未設定'}
         warn={!save.linked}
       >
@@ -96,7 +96,7 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
               <span className="min-w-0 truncate font-medium">{save.fileName}</span>
             </div>
             <div className="mt-0.5 text-xs text-ink-2">
-              1試合入力するたびに自動で書き込んでいます
+              1試合入れるたびに書き込んでいます
               {save.lastWrittenAt && ` · 最終 ${save.lastWrittenAt.slice(11, 16)}`}
             </div>
           </div>
@@ -202,7 +202,8 @@ function MatchRow({
           {idx.entryLabel(m.entryIds[1])}
         </span>
         <span className="block truncate text-xs text-ink-3">
-          第{m.number}試合 · {idx.blockLabel(m.groupId)} · {m.scheduledAt}
+          第{m.number}試合 · {idx.blockLabel(m.groupId)}
+          {m.lineupSlot ? ` · ${m.lineupSlot}` : ''} · {m.scheduledAt}
         </span>
       </span>
       <span className="shrink-0 text-xs text-ink-3">入力 ›</span>

@@ -30,7 +30,8 @@ export function BracketView({ matches, idx, onOpenMatch }: Props) {
       <div className="mb-3 flex items-baseline gap-2">
         <h2 className="text-base font-bold">トーナメント</h2>
         <span className="text-xs text-ink-2">
-          {ties.filter((t) => !t.bye).length}試合 ・ 残り{remaining}
+          全{ties.filter((t) => !t.bye).length}試合
+          {remaining > 0 ? ` ・ 残り${remaining}` : ' ・ すべて終わりました'}
         </span>
       </div>
 
@@ -45,10 +46,11 @@ export function BracketView({ matches, idx, onOpenMatch }: Props) {
         const inRound = ties.filter((t) => t.round === r)
         const played = inRound.filter((t) => !t.bye)
         if (played.length === 0) {
-          // 全部 BYE のラウンドは、行を作らず件数だけ伝える。
+          // このラウンドは1試合も行われない。出場者が枠を埋めきっていないだけで、
+          // 「全員が不戦勝」ではない（相手がいる組み合わせが1つも作れなかった）。
           return (
             <div key={r} className="mb-3 text-xs text-ink-3">
-              {roundLabel(r, rounds)}は全員が不戦勝で通過（{inRound.length}枠）
+              {roundLabel(r, rounds)}は試合なし。全員がそのまま次へ進みます
             </div>
           )
         }

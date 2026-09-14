@@ -205,7 +205,7 @@ export function InputScreen({
         {/* 警告。設定値を必ず添える。ブロックはしない */}
         {sum.issues.length > 0 && (
           <div className="mt-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-sm">
-            <div className="mb-1 font-semibold text-warn">⚠ 確認してください</div>
+            <div className="mb-1 font-semibold text-warn">スコアが設定と合っていません</div>
             {sum.issues.map((it, i) => (
               <div key={i} className="text-ink-2">
                 {it.message}

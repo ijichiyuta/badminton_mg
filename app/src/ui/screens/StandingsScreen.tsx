@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { describeRule } from '../../domain/scoring'
 import type { RankingResult } from '../../domain/types'
 import type { GroupRecord, MatchRecord, ScoringRuleRecord } from '../../store/schema'
+import { cellView } from '../standings'
 import { circled, type Indexes } from '../useApp'
 import { BracketView } from './BracketView'
 import type { StageRecord } from '../../store/schema'
@@ -116,67 +117,12 @@ export function GroupTable({
   const rule = rules.find((r) => r.id === ruleId)
 
   /**
-   * i 行 j 列のマスに入る試合。
+   * i 行 j 列のマスに入るもの。
    *
    * 団体戦では1つのマスに**対戦（Tie）が入り、その中に複数の試合がある**。
-   * 2複1単なら3試合。マスに出すのは対戦の勝敗で、各試合の内訳は開いた先で見る。
+   * 判定は `src/ui/standings.ts` にある（画面に埋めると検証できないため）。
    */
-  const cellMatches = (a: string, b: string): MatchRecord[] =>
-    matches.filter(
-      (m) =>
-        (m.entryIds[0] === a && m.entryIds[1] === b) ||
-        (m.entryIds[0] === b && m.entryIds[1] === a),
-    )
-
-  /** マスの表示内容。個人戦と団体戦で数える単位が違う。 */
-  function cellView(a: string, b: string) {
-    const ms = cellMatches(a, b)
-    if (ms.length === 0) return null
-    const head = ms[0]
-    const isTie = head.tieId !== null && ms.length > 1
-
-    if (!isTie) {
-      const m = head
-      const mine = m.entryIds[0] === a ? 0 : 1
-      let score: string | null = null
-      if (m.status === 'COMPLETED' && m.games.length > 0) {
-        let w = 0
-        let l = 0
-        for (const g of m.games) {
-          const my = mine === 0 ? g.scoreA : g.scoreB
-          const th = mine === 0 ? g.scoreB : g.scoreA
-          if (my > th) w++
-          else if (th > my) l++
-        }
-        score = `${w}-${l}`
-      }
-      return {
-        head: m,
-        open: m,
-        done: m.status === 'COMPLETED',
-        won: m.winnerEntryId === a,
-        score,
-        note: null as string | null,
-      }
-    }
-
-    // 団体戦。取ったマッチ数で数える。
-    const won = ms.filter((m) => m.winnerEntryId === a).length
-    const lost = ms.filter((m) => m.winnerEntryId === b).length
-    const need = Math.floor(ms.length / 2) + 1
-    const decided = won >= need || lost >= need
-    const allDone = ms.every((m) => m.status === 'COMPLETED')
-    // 未消化の試合があれば、そこを開く。無ければ先頭。
-    const open = ms.find((m) => m.status !== 'COMPLETED') ?? ms[0]
-    return {
-      head,
-      open,
-      done: decided || allDone,
-      won: won > lost,
-      score: `${won}-${lost}`,
-      note: decided && !allDone ? '決着' : null,
-    }
-  }
+  const view = (a: string, b: string) => cellView(matches, a, b)
 
   const rankOf = (entryId: string) => result?.entries.find((e) => e.entryId === entryId)
 
@@ -238,7 +184,7 @@ export function GroupTable({
                     if (i === j) {
                       return <td key={j} className="border-b border-r border-rule bg-rule-2" />
                     }
-                    const v = cellView(a, b)
+                    const v = view(a, b)
                     const upper = j > i
                     return (
                       <td

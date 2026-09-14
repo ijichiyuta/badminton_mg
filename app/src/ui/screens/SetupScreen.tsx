@@ -286,7 +286,7 @@ function TournamentStep({
           className="mt-1 text-sm text-primary"
           style={{ minHeight: 44 }}
         >
-          {advanced ? '▾ 閉じる' : '▸ 変更する'}
+          {advanced ? '閉じる' : '変える'}
         </button>
 
         {advanced && (
@@ -312,7 +312,8 @@ function TournamentStep({
               </div>
             </details>
 
-            <div className="mb-1 mt-3 text-xs font-bold text-ink-2">順位決定（要項の文面から選ぶ）</div>
+            <div className="mb-1 mt-3 text-xs font-bold text-ink-2">順位の決め方</div>
+            <div className="mb-1.5 text-xs text-ink-3">要項の書き方に近いものを選ぶ</div>
             <div className="flex flex-col gap-1.5">
               {RANKING_PRESETS.map((p) => (
                 <button
@@ -494,7 +495,7 @@ function EventsStep({
                     />
                     <FormatChoice
                       label="1対戦の組み方"
-                      hint="団体戦は1対戦が複数の試合に分かれる。個人戦なら「個人戦」のまま"
+                      hint="団体戦は1対戦が複数の試合に分かれる。その内訳を選ぶ"
                       options={[
                         { id: '', label: '個人戦' },
                         ...TEAM_LINEUP_PRESETS.map((x) => ({ id: x.id, label: x.label })),
@@ -733,7 +734,7 @@ function DrawStep({
                 className="ml-auto rounded border border-rule px-3 text-sm"
                 style={{ minHeight: 44 }}
               >
-                {gs.length > 0 ? '⟳ もう一度抽選' : '抽選する'}
+                {gs.length > 0 ? 'もう一度抽選' : '抽選する'}
               </button>
             </div>
             {gs.length > 0 && idx && (
@@ -781,7 +782,7 @@ function DrawStep({
         }
         style={{ minHeight: 52 }}
       >
-        🔒 確定して試合番号を振る
+        確定して試合番号を振る
       </button>
       <p className="mt-1 text-xs text-ink-3">確定後も抽選をやり直せますが、試合番号は振り直されます</p>
     </section>

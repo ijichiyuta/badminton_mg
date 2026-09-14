@@ -388,7 +388,14 @@ function PrintScoresheet({
     venue: tournament.venue,
     eventName: idx.eventById.get(match.eventId)?.name ?? '',
     // blockLabel は種目名を含むので、組名だけを取り出す（種目欄で重複させない）
-    blockName: idx.groupById.get(match.groupId ?? '')?.name ?? '',
+    // 団体戦では、その対戦のどの枠かを紙にも刷る。
+    // 審判が「第1ダブルスの用紙」を取り違えると、あとから復元できない。
+    blockName: [
+      idx.groupById.get(match.groupId ?? '')?.name ?? '',
+      match.lineupSlot ?? '',
+    ]
+      .filter(Boolean)
+      .join(' ・ '),
     courtName: `${match.courtId?.replace('c', '')}番コート`,
     scheduledAt: match.scheduledAt ?? '',
     sideA: { names: namesOf(match.entryIds[0]), affiliation: idx.entryAffiliation(match.entryIds[0]) },

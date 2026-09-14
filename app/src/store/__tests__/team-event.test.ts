@@ -18,6 +18,7 @@ import {
   standings,
 } from '../usecases'
 import { findTeamLineup } from '../../domain/presets'
+import { cellView } from '../../ui/standings'
 
 let d: BadmintonDb
 let dbIndex = 0
@@ -215,5 +216,46 @@ describe('順位の基準は種目ごとに解決する', () => {
     )
     const rec = await d.events.get(ev.id)
     expect(rec?.rankingRulePresetId).toBeNull()
+  })
+})
+
+describe('入力した結果が星取表のマスに出る', () => {
+  it('**3試合入れると、マスが対戦の勝敗になる**', async () => {
+    const { matches, group } = await setup()
+    const tieId = matches[0].tieId
+    const three = matches.filter((m) => m.tieId === tieId)
+    const [a, b] = three[0].entryIds
+
+    // 2複1単。第1ダブルスと第2ダブルスを取り、シングルスを落とす。
+    await enterResult({ matchId: three[0].id, games: [{ scoreA: 21, scoreB: 15 }, { scoreA: 21, scoreB: 10 }] }, d)
+    await enterResult({ matchId: three[1].id, games: [{ scoreA: 15, scoreB: 21 }, { scoreA: 10, scoreB: 21 }] }, d)
+    await enterResult({ matchId: three[2].id, games: [{ scoreA: 21, scoreB: 18 }, { scoreA: 21, scoreB: 19 }] }, d)
+
+    const after = await d.matches.where({ groupId: group.id }).toArray()
+    const v = cellView(after, a as string, b as string)
+    expect(v?.done).toBe(true)
+    expect(v?.score).toBe('2-1')
+    expect(v?.won).toBe(true)
+
+    // 相手から見ると裏返る
+    const back = cellView(after, b as string, a as string)
+    expect(back?.score).toBe('1-2')
+    expect(back?.won).toBe(false)
+  })
+
+  it('2試合先取した時点で決着として出る。3試合目は未消化のまま', async () => {
+    const { matches, group } = await setup()
+    const three = matches.filter((m) => m.tieId === matches[0].tieId)
+    const [a, b] = three[0].entryIds
+    await enterResult({ matchId: three[0].id, games: [{ scoreA: 21, scoreB: 15 }, { scoreA: 21, scoreB: 10 }] }, d)
+    await enterResult({ matchId: three[1].id, games: [{ scoreA: 21, scoreB: 15 }, { scoreA: 21, scoreB: 12 }] }, d)
+
+    const after = await d.matches.where({ groupId: group.id }).toArray()
+    const v = cellView(after, a as string, b as string)
+    expect(v?.done).toBe(true)
+    expect(v?.decidedEarly).toBe(true)
+    expect(v?.score).toBe('2-0')
+    // 残った試合を開ける
+    expect(v?.open.id).toBe(three[2].id)
   })
 })

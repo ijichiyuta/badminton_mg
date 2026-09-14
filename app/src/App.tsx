@@ -8,12 +8,14 @@ import { HomeScreen } from './ui/screens/HomeScreen'
 import { InputScreen } from './ui/screens/InputScreen'
 import { StandingsScreen } from './ui/screens/StandingsScreen'
 import { PrintScreen } from './ui/screens/PrintScreen'
+import { SetupScreen } from './ui/screens/SetupScreen'
 import { TimetableScreen } from './ui/screens/TimetableScreen'
+import { ViewerScreen } from './ui/screens/ViewerScreen'
 import { useApp, useIndexes } from './ui/useApp'
 import type { MatchRecord } from './store/schema'
 import type { Game } from './domain/types'
 
-type Tab = 'home' | 'input' | 'standings' | 'timetable' | 'print'
+type Tab = 'home' | 'input' | 'standings' | 'timetable' | 'print' | 'setup'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'home', label: 'ホーム' },
@@ -21,11 +23,24 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'standings', label: '星取表' },
   { id: 'timetable', label: '進行' },
   { id: 'print', label: '印刷' },
+  { id: 'setup', label: '設定' },
 ]
 
 type TextSize = 'small' | 'normal' | 'large'
 
+/** `?view=<大会ID>` で開かれたら閲覧ページ。読むだけで書き込めない。 */
+function viewerTarget(): string | null {
+  if (typeof location === 'undefined') return null
+  return new URLSearchParams(location.search).get('view')
+}
+
 export default function App() {
+  const viewing = viewerTarget()
+  if (viewing) return <ViewerScreen tournamentId={viewing} />
+  return <OperatorApp />
+}
+
+function OperatorApp() {
   const app = useApp()
   const idx = useIndexes(app.data)
   const [tab, setTab] = useState<Tab>('home')
@@ -106,6 +121,28 @@ export default function App() {
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {app.publishState.configured && (
+            <button
+              onClick={() => void app.publishNow()}
+              disabled={app.publishState.busy}
+              aria-label="速報を公開"
+              className={
+                'rounded border px-2 text-xs ' +
+                (app.publishState.publishedAt
+                  ? 'border-ok text-ok'
+                  : 'border-rule text-ink-2')
+              }
+              style={{ minHeight: 44 }}
+            >
+              {app.publishState.busy
+                ? '送信中'
+                : app.publishState.error
+                  ? '未同期'
+                  : app.publishState.publishedAt
+                    ? `公開 ${app.publishState.publishedAt.slice(11, 16)}`
+                    : '速報を公開'}
+            </button>
+          )}
           {(['small', 'normal', 'large'] as TextSize[]).map((s, i) => (
             <button
               key={s}
@@ -177,6 +214,16 @@ export default function App() {
             idx={idx}
           />
         )}
+        {tab === 'setup' && (
+          <SetupScreen
+            tournament={t}
+            events={app.data.events}
+            groups={app.data.groups}
+            idx={idx}
+            actions={app.setupActions}
+            onFinish={() => setTab('home')}
+          />
+        )}
       </main>
 
       {/* Undo トースト。確認ダイアログの代わり。5秒で消す */}
@@ -190,13 +237,13 @@ export default function App() {
         />
       )}
 
-      <nav className="grid grid-cols-5 border-t border-rule no-print">
+      <nav className="grid grid-cols-6 border-t border-rule no-print">
         {TABS.map((x) => (
           <button
             key={x.id}
             onClick={() => setTab(x.id)}
             className={
-              'py-2 text-sm ' +
+              'py-2 text-xs ' +
               (tab === x.id ? 'font-bold text-primary' : 'text-ink-2')
             }
             style={{ minHeight: 52 }}

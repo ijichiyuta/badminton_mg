@@ -3,14 +3,28 @@
 // 同期もサーバもない。端末内の Dexie だけが正（ADR-0001）。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { db } from '../store/db'
+import { db, type BadmintonDb } from '../store/db'
 import {
+  addEntries,
+  addEvent,
+  addStage,
+  buildGroups as buildGroupsUseCase,
+  buildMatches,
   clearResult as clearResultUseCase,
+  createTournament as createTournamentUseCase,
   enterResult as enterResultUseCase,
   lastUndoable,
   standings,
   undo as undoUseCase,
 } from '../store/usecases'
+import {
+  isPublishConfigured,
+  publish,
+  publishToken,
+  viewerUrl,
+  type NameVisibility,
+} from '../store/publish'
+import type { ParsedRow } from './roster'
 import { ensureDemo, resetDemo } from './demo'
 import { snapshot } from '../store/db'
 import {
@@ -55,10 +69,23 @@ export function useApp() {
   const [toast, setToast] = useState<Toast | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<FileSaveStatus>(() => fileSaveStatus())
+  const [publishState, setPublishState] = useState<{
+    configured: boolean
+    publishedAt: string | null
+    url: string | null
+    error: string | null
+    busy: boolean
+  }>({ configured: isPublishConfigured(), publishedAt: null, url: null, error: null, busy: false })
 
   // 容量不足による自動削除から守る。1行で済むので必ず呼ぶ。
   useEffect(() => {
     void requestPersistentStorage()
+  }, [])
+
+  /** 大会が1つも無ければ null を返す。デモは作らない。 */
+  const loadTournament = useCallback(async (d: BadmintonDb) => {
+    const all = await d.tournaments.toArray()
+    return all[0] ?? null
   }, [])
 
   const load = useCallback(async () => {
@@ -169,6 +196,118 @@ export function useApp() {
     setToast({ message: 'デモを作り直しました', operationId: null })
   }, [load])
 
+  // -------------------------------------------------------------------------
+  // 大会作成〜組合せ
+  // -------------------------------------------------------------------------
+
+  const setupActions = useMemo(
+    () => ({
+      createTournament: async (v: {
+        name: string
+        date: string
+        venue: string
+        courtCount: number
+        scoringPresetId: string
+        rankingPresetId: string
+      }) => {
+        const t = await createTournamentUseCase(v)
+        await load()
+        return t
+      },
+      addEventWithStage: async (tournamentId: string, name: string, female: boolean) => {
+        const event = await addEvent(
+          tournamentId,
+          {
+            name,
+            discipline: name.includes('シングル') ? (female ? 'WS' : 'MS') : female ? 'WD' : 'MD',
+            category: '',
+            entryType: name.includes('シングル') ? 'INDIVIDUAL' : 'PAIR',
+            scoringRuleId: null,
+            rankingRulePresetId: null,
+          },
+          db(),
+        )
+        const stage = await addStage(tournamentId, event.id, { name: '予選リーグ', type: 'ROUND_ROBIN' }, db())
+        await load()
+        return { event, stage }
+      },
+      importRoster: async (eventId: string, rows: ParsedRow[]) => {
+        const d = db()
+        const ev = await d.events.get(eventId)
+        if (!ev) throw new Error('種目が見つかりません')
+        await addEntries(
+          ev.tournamentId,
+          eventId,
+          rows.map((r) => ({
+            playerNames: r.playerNames,
+            affiliation: r.affiliation,
+            seed: r.seed,
+          })),
+          d,
+        )
+        await load()
+      },
+      buildGroups: async (stageKey: string, opts: { perGroup: number; drawSeed: number }) => {
+        const d = db()
+        // SetupScreen は `stage:<eventId>` の形で渡してくる。
+        const eventId = stageKey.startsWith('stage:') ? stageKey.slice(6) : null
+        const stage = eventId
+          ? (await d.stages.where({ eventId }).toArray())[0]
+          : await d.stages.get(stageKey)
+        if (!stage) throw new Error('ステージが見つかりません')
+        const gs = await buildGroupsUseCase(
+          { stageId: stage.id, perGroup: opts.perGroup, drawSeed: opts.drawSeed, separateSameAffiliation: true },
+          d,
+        )
+        await load()
+        return gs
+      },
+      buildSchedule: async (opts: { courtCount: number; startTime: string; slotMinutes: number }) => {
+        const d = db()
+        const all = await d.tournaments.toArray()
+        if (all.length === 0) throw new Error('大会がありません')
+        await buildMatches(all[0].id, opts, d)
+        await load()
+      },
+    }),
+    [load],
+  )
+
+  // -------------------------------------------------------------------------
+  // 速報の公開
+  // -------------------------------------------------------------------------
+
+  /**
+   * 公開する。**失敗しても画面を止めない**（UX原則6）。
+   * 状態表示が変わるだけで、運営は続く。
+   */
+  const publishNow = useCallback(
+    async (nameVisibility: NameVisibility = 'FULL') => {
+      if (!data) return
+      setPublishState((s) => ({ ...s, busy: true }))
+      try {
+        const snap = await snapshot(data.tournament.id)
+        await publish(snap, { nameVisibility })
+        publishToken(data.tournament.id)
+        setPublishState({
+          configured: true,
+          publishedAt: new Date().toISOString(),
+          url: viewerUrl(data.tournament.id),
+          error: null,
+          busy: false,
+        })
+        setToast({ message: '速報を公開しました', operationId: null })
+      } catch (e) {
+        setPublishState((s) => ({
+          ...s,
+          busy: false,
+          error: e instanceof Error ? e.message : String(e),
+        }))
+      }
+    },
+    [data],
+  )
+
   const getStandings = useCallback(
     (groupId: string): Promise<RankingResult> => standings(groupId),
     [],
@@ -188,6 +327,10 @@ export function useApp() {
     chooseFile,
     exportFile,
     getStandings,
+    setupActions,
+    publishState,
+    publishNow,
+    loadTournament,
     reload: load,
   }
 }

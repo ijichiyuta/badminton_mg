@@ -171,6 +171,13 @@ export interface Player {
   name: string
   kana?: string
   affiliation?: string
+  region?: string
+  grade?: string
+  /**
+   * 備考。名簿の取り込み元によっては**連絡先や住所が紛れ込みうる**。
+   * 公開スナップショットでは必ず落とす（`store/publish.ts` の `redact`）。
+   */
+  note?: string
 }
 
 export type EntryStatus = 'ACTIVE' | 'WITHDRAWN' | 'SUBSTITUTED'

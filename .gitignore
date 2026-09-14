@@ -19,3 +19,7 @@ Thumbs.db
 *.swp
 .cache/
 tmp/
+
+# 認証情報。絶対にコミットしない
+.secrets/
+.env.local

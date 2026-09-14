@@ -1,0 +1,158 @@
+// ホーム画面。docs/15-ui-ux.md 第2部4 / docs/13-operator-load.md O-4-1
+//
+// 機能メニューではなく**行動リスト**にする。次に何をすべきかを提示する。
+// 警告は該当0件なら行ごと消す。「0件」は表示しない。
+
+import type { MatchRecord } from '../../store/schema'
+import type { Indexes } from '../useApp'
+
+interface Props {
+  matches: MatchRecord[]
+  idx: Indexes
+  courtCount: number
+  onOpenMatch: (m: MatchRecord) => void
+}
+
+/** 結果が入っていないまま時間が経った試合とみなす閾値（枠数）。 */
+const STALE_SLOTS = 1
+
+export function HomeScreen({ matches, idx, courtCount, onOpenMatch }: Props) {
+  const done = matches.filter((m) => m.status === 'COMPLETED')
+  const pending = matches.filter((m) => m.status !== 'COMPLETED')
+
+  // 進行中とみなす枠＝未入力のうち最も早い時刻。
+  const currentSlot = pending[0]?.scheduledAt ?? null
+  const slots = [...new Set(matches.map((m) => m.scheduledAt))].sort()
+  const slotIndex = new Map(slots.map((t, i) => [t, i]))
+  const curIdx = currentSlot ? (slotIndex.get(currentSlot) ?? 0) : slots.length
+
+  // 次に呼ぶ試合。2試合先まで出して呼びに行く回数を減らす（O-5-2）。
+  const next = pending.slice(0, courtCount + 2)
+
+  // 前の枠なのに未入力＝結果が届いていない。
+  const stale = pending.filter((m) => (slotIndex.get(m.scheduledAt) ?? 0) < curIdx - STALE_SLOTS + 1)
+
+  const byEvent = new Map<string, { done: number; total: number }>()
+  for (const m of matches) {
+    const label = idx.eventById.get(m.eventId)?.name ?? '—'
+    const cur = byEvent.get(label) ?? { done: 0, total: 0 }
+    cur.total++
+    if (m.status === 'COMPLETED') cur.done++
+    byEvent.set(label, cur)
+  }
+
+  return (
+    <div className="h-full overflow-y-auto px-3 py-3">
+      {pending.length === 0 ? (
+        <div className="rounded border border-ok bg-ok-soft px-3 py-6 text-center">
+          <div className="text-lg font-bold text-ok">すべて入力済みです</div>
+          <div className="mt-1 text-sm text-ink-2">結果を印刷して掲示できます</div>
+        </div>
+      ) : (
+        <>
+          <Section title={`次に呼ぶ試合`} note={`${currentSlot ?? ''} の枠`}>
+            <div className="flex flex-col">
+              {next.slice(0, courtCount).map((m) => (
+                <MatchRow key={m.id} m={m} idx={idx} onClick={() => onOpenMatch(m)} />
+              ))}
+            </div>
+            {next.length > courtCount && (
+              <div className="mt-1 border-t border-rule-2 pt-1">
+                <div className="mb-1 text-xs text-ink-3">そのあと</div>
+                {next.slice(courtCount).map((m) => (
+                  <MatchRow key={m.id} m={m} idx={idx} onClick={() => onOpenMatch(m)} compact />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {stale.length > 0 && (
+            <Section title="結果が届いていない" warn note={`${stale.length}件`}>
+              {stale.slice(0, 5).map((m) => (
+                <MatchRow key={m.id} m={m} idx={idx} onClick={() => onOpenMatch(m)} />
+              ))}
+            </Section>
+          )}
+        </>
+      )}
+
+      <Section title="進捗" note={`${done.length} / ${matches.length} 試合`}>
+        <div className="flex flex-col gap-1.5">
+          {[...byEvent.entries()].map(([label, v]) => (
+            <div key={label} className="grid grid-cols-[1fr_5rem_3rem] items-center gap-2 text-sm">
+              <span className="truncate">{label}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-rule-2">
+                <span
+                  className="block h-full bg-primary"
+                  style={{ width: `${Math.round((v.done / v.total) * 100)}%` }}
+                />
+              </span>
+              <span className="text-right text-xs text-ink-2 tabular">
+                {Math.round((v.done / v.total) * 100)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function Section({
+  title,
+  note,
+  warn,
+  children,
+}: {
+  title: string
+  note?: string
+  warn?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <section className="mb-4">
+      <div className="mb-1.5 flex items-baseline gap-2">
+        {warn && <span className="text-warn">⚠</span>}
+        <h2 className={'text-sm font-bold ' + (warn ? 'text-warn' : 'text-ink')}>{title}</h2>
+        {note && <span className="text-xs text-ink-3 tabular">{note}</span>}
+      </div>
+      <div className={'rounded border ' + (warn ? 'border-warn bg-warn-soft' : 'border-rule')}>
+        <div className="p-2">{children}</div>
+      </div>
+    </section>
+  )
+}
+
+function MatchRow({
+  m,
+  idx,
+  onClick,
+  compact,
+}: {
+  m: MatchRecord
+  idx: Indexes
+  onClick: () => void
+  compact?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded px-1 py-1.5 text-left active:bg-primary-soft"
+      style={{ minHeight: 44 }}
+    >
+      <span className="w-10 shrink-0 text-center text-xs font-bold text-primary tabular">
+        {m.courtId?.replace('c', '')}番
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={'block truncate ' + (compact ? 'text-sm text-ink-2' : 'font-semibold')}>
+          {idx.entryLabel(m.entryIds[0])} <span className="text-ink-3">vs</span>{' '}
+          {idx.entryLabel(m.entryIds[1])}
+        </span>
+        <span className="block truncate text-xs text-ink-3">
+          第{m.number}試合 · {idx.blockLabel(m.groupId)} · {m.scheduledAt}
+        </span>
+      </span>
+      <span className="shrink-0 text-xs text-ink-3">入力 ›</span>
+    </button>
+  )
+}

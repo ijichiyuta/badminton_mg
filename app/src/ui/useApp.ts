@@ -25,6 +25,7 @@ import {
   type NameVisibility,
 } from '../store/publish'
 import type { ParsedRow } from './roster'
+import { DEFAULT_TEAM_LINEUP_ID, DEFAULT_TEAM_RANKING_PRESET_ID } from '../domain/presets'
 import { ensureDemo, resetDemo } from './demo'
 import { snapshot } from '../store/db'
 import {
@@ -44,6 +45,8 @@ import type {
   OperationRecord,
   PlayerRecord,
   ScoringRuleRecord,
+  StageRecord,
+  StageType,
   TournamentRecord,
 } from '../store/schema'
 import type { EntryRecord } from '../store/schema'
@@ -52,6 +55,7 @@ import type { Game, RankingResult, ResultType } from '../domain/types'
 export interface AppData {
   tournament: TournamentRecord
   events: EventRecord[]
+  stages: StageRecord[]
   groups: GroupRecord[]
   entries: EntryRecord[]
   players: PlayerRecord[]
@@ -93,8 +97,9 @@ export function useApp() {
           ? await ensureDemo(d)
           : [...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
       const where = { tournamentId: t.id }
-      const [events, groups, entries, players, matches, scoringRules] = await Promise.all([
+      const [events, stages, groups, entries, players, matches, scoringRules] = await Promise.all([
         d.events.where(where).toArray(),
+        d.stages.where(where).toArray(),
         d.groups.where(where).toArray(),
         d.entries.where(where).toArray(),
         d.players.where(where).toArray(),
@@ -104,6 +109,7 @@ export function useApp() {
       setData({
         tournament: t,
         events: events.sort((a, b) => a.order - b.order),
+        stages: stages.sort((a, b) => a.order - b.order),
         groups: groups.sort((a, b) => a.order - b.order),
         entries,
         players,
@@ -252,22 +258,76 @@ export function useApp() {
         await load()
         return t
       },
-      addEventWithStage: async (tournamentId: string, name: string, female: boolean) => {
+      addEventWithStage: async (
+        tournamentId: string,
+        name: string,
+        female: boolean,
+        opts: { team?: boolean; teamLineupId?: string; stageType?: StageType } = {},
+      ) => {
+        const single = name.includes('シングル')
+        const stageType = opts.stageType ?? 'ROUND_ROBIN'
         const event = await addEvent(
           tournamentId,
           {
             name,
-            discipline: name.includes('シングル') ? (female ? 'WS' : 'MS') : female ? 'WD' : 'MD',
+            discipline: opts.team ? 'TEAM' : single ? (female ? 'WS' : 'MS') : female ? 'WD' : 'MD',
             category: '',
-            entryType: name.includes('シングル') ? 'INDIVIDUAL' : 'PAIR',
+            entryType: opts.team ? 'TEAM' : single ? 'INDIVIDUAL' : 'PAIR',
+            teamLineupId: opts.team ? (opts.teamLineupId ?? DEFAULT_TEAM_LINEUP_ID) : null,
             scoringRuleId: null,
+            // 団体戦向けの既定は addEvent 側で入る。ここでは指定しない。
             rankingRulePresetId: null,
           },
           db(),
         )
-        const stage = await addStage(tournamentId, event.id, { name: '予選リーグ', type: 'ROUND_ROBIN' }, db())
+        const stage = await addStage(
+          tournamentId,
+          event.id,
+          {
+            name: stageType === 'SINGLE_ELIMINATION' ? 'トーナメント' : 'ブロック戦',
+            type: stageType,
+            options: stageType === 'SINGLE_ELIMINATION' ? { drawSeed: Date.now() % 100000 } : {},
+          },
+          db(),
+        )
         await load()
         return { event, stage }
+      },
+
+      /** 種目の進め方と組み方を変える。**組合せを作る前だけ**許す。 */
+      updateEventFormat: async (
+        eventId: string,
+        patch: { teamLineupId?: string | null; stageType?: StageType },
+      ) => {
+        const d = db()
+        const ev = await d.events.get(eventId)
+        if (!ev) return
+        if (patch.teamLineupId !== undefined) {
+          const team = patch.teamLineupId !== null
+          await d.events.put({
+            ...ev,
+            teamLineupId: patch.teamLineupId,
+            entryType: team ? 'TEAM' : ev.name.includes('シングル') ? 'INDIVIDUAL' : 'PAIR',
+            discipline: team ? 'TEAM' : ev.discipline === 'TEAM' ? 'MD' : ev.discipline,
+            // 個人戦へ戻したら大会の既定に、団体戦にしたら団体戦の既定に。
+            rankingRulePresetId: team ? DEFAULT_TEAM_RANKING_PRESET_ID : null,
+          })
+        }
+        if (patch.stageType !== undefined) {
+          const stages = await d.stages.where({ eventId }).toArray()
+          for (const st of stages) {
+            await d.stages.put({
+              ...st,
+              type: patch.stageType,
+              name: patch.stageType === 'SINGLE_ELIMINATION' ? 'トーナメント' : 'ブロック戦',
+              options:
+                patch.stageType === 'SINGLE_ELIMINATION'
+                  ? { ...st.options, drawSeed: st.options.drawSeed ?? Date.now() % 100000 }
+                  : st.options,
+            })
+          }
+        }
+        await load()
       },
       importRoster: async (eventId: string, rows: ParsedRow[]) => {
         const d = db()

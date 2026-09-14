@@ -188,3 +188,32 @@ describe('個人戦は今までどおり', () => {
     expect(matches.every((m) => m.lineupSlot === null)).toBe(true)
   })
 })
+
+describe('順位の基準は種目ごとに解決する', () => {
+  it('**団体戦は団体戦用の基準を使う**（大会の既定を引きずらない）', async () => {
+    const { ev } = await setup()
+    const rec = await d.events.get(ev.id)
+    expect(rec?.rankingRulePresetId).toBe('team-league-aichi')
+  })
+
+  it('まだ1試合も終わっていない段階で抽選に落とさない', async () => {
+    const { group } = await setup()
+    const r = await standings(group.id, d)
+    expect(r.warnings.some((w) => w.kind === 'DRAW_USED')).toBe(false)
+    for (const e of r.entries) expect(e.reason).toBe('まだ試合が行われていません')
+  })
+
+  it('個人戦は大会の既定のまま', async () => {
+    const t = await createTournament(
+      { name: '個人戦', date: '2026-09-06', venue: '体育館', organizer: 'テスト', courtCount: 4 },
+      d,
+    )
+    const ev = await addEvent(
+      t.id,
+      { name: '男子ダブルス', discipline: 'MD', category: '', entryType: 'PAIR', scoringRuleId: null, rankingRulePresetId: null },
+      d,
+    )
+    const rec = await d.events.get(ev.id)
+    expect(rec?.rankingRulePresetId).toBeNull()
+  })
+})

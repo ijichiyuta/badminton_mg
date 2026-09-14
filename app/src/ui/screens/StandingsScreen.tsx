@@ -11,9 +11,12 @@ import { describeRule } from '../../domain/scoring'
 import type { RankingResult } from '../../domain/types'
 import type { GroupRecord, MatchRecord, ScoringRuleRecord } from '../../store/schema'
 import { circled, type Indexes } from '../useApp'
+import { BracketView } from './BracketView'
+import type { StageRecord } from '../../store/schema'
 
 interface Props {
   groups: GroupRecord[]
+  stages: StageRecord[]
   matches: MatchRecord[]
   rules: ScoringRuleRecord[]
   idx: Indexes
@@ -21,7 +24,15 @@ interface Props {
   onOpenMatch: (m: MatchRecord) => void
 }
 
-export function StandingsScreen({ groups, matches, rules, idx, getStandings, onOpenMatch }: Props) {
+export function StandingsScreen({
+  groups,
+  stages,
+  matches,
+  rules,
+  idx,
+  getStandings,
+  onOpenMatch,
+}: Props) {
   const [selected, setSelected] = useState(groups[0]?.id ?? '')
   const group = groups.find((g) => g.id === selected) ?? groups[0]
 
@@ -49,6 +60,15 @@ export function StandingsScreen({ groups, matches, rules, idx, getStandings, onO
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
+        {/* 形式で見せ方が変わる。総当たりは星取表、勝ち上がりはトーナメント表。 */}
+        {stages.find((st) => st.id === group.stageId)?.type === 'SINGLE_ELIMINATION' ? (
+          <BracketView
+            key={group.id}
+            matches={matches.filter((m) => m.groupId === group.id)}
+            idx={idx}
+            onOpenMatch={onOpenMatch}
+          />
+        ) : (
         <GroupTable
           key={group.id}
           group={group}
@@ -58,6 +78,7 @@ export function StandingsScreen({ groups, matches, rules, idx, getStandings, onO
           getStandings={getStandings}
           onOpenMatch={onOpenMatch}
         />
+        )}
       </div>
     </div>
   )
@@ -94,13 +115,68 @@ export function GroupTable({
   const ruleId = matches[0]?.scoringRuleId ?? null
   const rule = rules.find((r) => r.id === ruleId)
 
-  /** i 行 j 列のマスに入る試合。 */
-  const cellMatch = (a: string, b: string): MatchRecord | undefined =>
-    matches.find(
+  /**
+   * i 行 j 列のマスに入る試合。
+   *
+   * 団体戦では1つのマスに**対戦（Tie）が入り、その中に複数の試合がある**。
+   * 2複1単なら3試合。マスに出すのは対戦の勝敗で、各試合の内訳は開いた先で見る。
+   */
+  const cellMatches = (a: string, b: string): MatchRecord[] =>
+    matches.filter(
       (m) =>
         (m.entryIds[0] === a && m.entryIds[1] === b) ||
         (m.entryIds[0] === b && m.entryIds[1] === a),
     )
+
+  /** マスの表示内容。個人戦と団体戦で数える単位が違う。 */
+  function cellView(a: string, b: string) {
+    const ms = cellMatches(a, b)
+    if (ms.length === 0) return null
+    const head = ms[0]
+    const isTie = head.tieId !== null && ms.length > 1
+
+    if (!isTie) {
+      const m = head
+      const mine = m.entryIds[0] === a ? 0 : 1
+      let score: string | null = null
+      if (m.status === 'COMPLETED' && m.games.length > 0) {
+        let w = 0
+        let l = 0
+        for (const g of m.games) {
+          const my = mine === 0 ? g.scoreA : g.scoreB
+          const th = mine === 0 ? g.scoreB : g.scoreA
+          if (my > th) w++
+          else if (th > my) l++
+        }
+        score = `${w}-${l}`
+      }
+      return {
+        head: m,
+        open: m,
+        done: m.status === 'COMPLETED',
+        won: m.winnerEntryId === a,
+        score,
+        note: null as string | null,
+      }
+    }
+
+    // 団体戦。取ったマッチ数で数える。
+    const won = ms.filter((m) => m.winnerEntryId === a).length
+    const lost = ms.filter((m) => m.winnerEntryId === b).length
+    const need = Math.floor(ms.length / 2) + 1
+    const decided = won >= need || lost >= need
+    const allDone = ms.every((m) => m.status === 'COMPLETED')
+    // 未消化の試合があれば、そこを開く。無ければ先頭。
+    const open = ms.find((m) => m.status !== 'COMPLETED') ?? ms[0]
+    return {
+      head,
+      open,
+      done: decided || allDone,
+      won: won > lost,
+      score: `${won}-${lost}`,
+      note: decided && !allDone ? '決着' : null,
+    }
+  }
 
   const rankOf = (entryId: string) => result?.entries.find((e) => e.entryId === entryId)
 
@@ -162,43 +238,27 @@ export function GroupTable({
                     if (i === j) {
                       return <td key={j} className="border-b border-r border-rule bg-rule-2" />
                     }
-                    const m = cellMatch(a, b)
+                    const v = cellView(a, b)
                     const upper = j > i
-                    // **自分の点だけを並べると読めない。** ゲームカウントで出す。
-                    // 各ゲームのスコアは入力画面で確認できる。
-                    const mine = m?.entryIds[0] === a ? 0 : 1
-                    let score: string | null = null
-                    if (m && m.status === 'COMPLETED' && m.games.length > 0) {
-                      let w = 0
-                      let l = 0
-                      for (const g of m.games) {
-                        const my = mine === 0 ? g.scoreA : g.scoreB
-                        const th = mine === 0 ? g.scoreB : g.scoreA
-                        if (my > th) w++
-                        else if (th > my) l++
-                      }
-                      score = `${w}-${l}`
-                    }
-                    const won = m?.winnerEntryId === a
                     return (
                       <td
                         key={j}
                         className="cursor-pointer border-b border-r border-rule px-0.5 py-1 text-center align-middle active:bg-primary-soft"
-                        onClick={() => m && onOpenMatch(m)}
+                        onClick={() => v && onOpenMatch(v.open)}
                       >
                         {/* 上三角＝通し番号、下三角＝丸数字。現行の書式 */}
                         <div className="text-xs leading-tight tabular text-ink-3">
-                          {upper ? m?.number : circled(m?.numberInGroup ?? null)}
+                          {upper ? v?.head.number : circled(v?.head.numberInGroup ?? null)}
                         </div>
-                        {m?.status === 'COMPLETED' ? (
+                        {v?.done ? (
                           <div
                             className={
                               'whitespace-nowrap text-xs leading-tight tabular ' +
-                              (won ? 'font-bold text-ok' : 'text-ink-2')
+                              (v.won ? 'font-bold text-ok' : 'text-ink-2')
                             }
                           >
-                            {won ? '○' : '●'}
-                            <span className="ml-0.5">{score}</span>
+                            {v.won ? '○' : '●'}
+                            <span className="ml-0.5">{v.score}</span>
                           </div>
                         ) : (
                           <div className="text-xs leading-tight text-ink-3">–</div>

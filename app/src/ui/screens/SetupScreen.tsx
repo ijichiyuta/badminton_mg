@@ -9,7 +9,14 @@
 import { useMemo, useState } from 'react'
 import { SCORING_PRESETS, RANKING_PRESETS, DEFAULT_SCORING_PRESET_ID, DEFAULT_RANKING_PRESET_ID } from '../../domain/presets'
 import { parseRoster, type ParsedRow } from '../roster'
-import type { EventRecord, GroupRecord, StageRecord, TournamentRecord } from '../../store/schema'
+import { TEAM_LINEUP_PRESETS, findTeamLineup } from '../../domain/presets'
+import type {
+  EventRecord,
+  GroupRecord,
+  StageRecord,
+  StageType,
+  TournamentRecord,
+} from '../../store/schema'
 import type { Indexes } from '../useApp'
 
 export interface SetupActions {
@@ -25,7 +32,12 @@ export interface SetupActions {
     tournamentId: string,
     name: string,
     female: boolean,
+    opts?: { team?: boolean; teamLineupId?: string; stageType?: StageType },
   ) => Promise<{ event: EventRecord; stage: StageRecord }>
+  updateEventFormat: (
+    eventId: string,
+    patch: { teamLineupId?: string | null; stageType?: StageType },
+  ) => Promise<void>
   importRoster: (eventId: string, rows: ParsedRow[]) => Promise<void>
   buildGroups: (stageId: string, opts: { perGroup: number; drawSeed: number }) => Promise<GroupRecord[]>
   buildSchedule: (opts: { courtCount: number; startTime: string; slotMinutes: number }) => Promise<void>
@@ -36,13 +48,14 @@ type Step = 'tournament' | 'events' | 'roster' | 'draw' | 'done'
 interface Props {
   tournament: TournamentRecord | null
   events: EventRecord[]
+  stages: StageRecord[]
   groups: GroupRecord[]
   idx: Indexes | null
   actions: SetupActions
   onFinish: () => void
 }
 
-export function SetupScreen({ tournament, events, groups, idx, actions, onFinish }: Props) {
+export function SetupScreen({ tournament, events, stages, groups, idx, actions, onFinish }: Props) {
   const [step, setStep] = useState<Step>(tournament ? 'events' : 'tournament')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -75,11 +88,20 @@ export function SetupScreen({ tournament, events, groups, idx, actions, onFinish
         <EventsStep
           tournament={tournament}
           events={events}
+          stages={stages}
           busy={busy}
-          onAdd={async (name, female) => {
+          onAdd={async (name, female, opts) => {
             setBusy(true)
             try {
-              await actions.addEventWithStage(tournament.id, name, female)
+              await actions.addEventWithStage(tournament.id, name, female, opts)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onChangeFormat={async (eventId, patch) => {
+            setBusy(true)
+            try {
+              await actions.updateEventFormat(eventId, patch)
             } finally {
               setBusy(false)
             }
@@ -338,27 +360,49 @@ const EVENT_PRESETS = [
   { name: '混合ダブルス', female: false },
 ]
 
+/** 団体戦。押した時点で2複1単になる。内訳は「変える」から選び直せる。 */
+const TEAM_EVENT_PRESETS = [
+  { name: '男子団体', female: false },
+  { name: '女子団体', female: true },
+]
+
 function EventsStep({
   tournament,
   events,
+  stages,
   busy,
   onAdd,
+  onChangeFormat,
   onNext,
 }: {
   tournament: TournamentRecord
   events: EventRecord[]
+  stages: StageRecord[]
   busy: boolean
-  onAdd: (name: string, female: boolean) => void
+  onAdd: (
+    name: string,
+    female: boolean,
+    opts?: { team?: boolean; teamLineupId?: string; stageType?: StageType },
+  ) => void
+  onChangeFormat: (
+    eventId: string,
+    patch: { teamLineupId?: string | null; stageType?: StageType },
+  ) => void
   onNext: () => void
 }) {
   const [custom, setCustom] = useState('')
+  const [open, setOpen] = useState<string | null>(null)
+
+  const stageOf = (eventId: string) => stages.find((st) => st.eventId === eventId)
 
   return (
     <section>
       <h2 className="mb-1 text-base font-bold">どの種目をやりますか？</h2>
-      <p className="mb-2 text-xs text-ink-2">{tournament.name}</p>
+      <p className="mb-3 text-xs text-ink-2">
+        {tournament.name}。押すと追加します。あとから進め方を変えられます。
+      </p>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-2 flex flex-wrap gap-1.5">
         {EVENT_PRESETS.map((p) => (
           <button
             key={p.name}
@@ -367,12 +411,27 @@ function EventsStep({
             className="rounded border border-rule px-3 text-sm"
             style={{ minHeight: 44 }}
           >
-            + {p.name}
+            ＋ {p.name}
           </button>
         ))}
       </div>
 
-      <div className="mb-3 flex gap-2">
+      {/* 団体戦は種目そのものが別物なので行を分ける。押した時点で2複1単になる。 */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {TEAM_EVENT_PRESETS.map((p) => (
+          <button
+            key={p.name}
+            disabled={busy}
+            onClick={() => onAdd(p.name, p.female, { team: true })}
+            className="rounded border border-rule px-3 text-sm"
+            style={{ minHeight: 44 }}
+          >
+            ＋ {p.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-4 flex gap-2">
         <input
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
@@ -394,12 +453,61 @@ function EventsStep({
       </div>
 
       {events.length > 0 && (
-        <div className="mb-3 rounded border border-rule">
-          {events.map((e) => (
-            <div key={e.id} className="border-b border-rule-2 px-3 py-2 text-sm last:border-b-0">
-              {e.name}
-            </div>
-          ))}
+        <div className="mb-4 overflow-hidden rounded border border-rule">
+          {events.map((e) => {
+            const st = stageOf(e.id)
+            const knockout = st?.type === 'SINGLE_ELIMINATION'
+            const lineup = e.teamLineupId ? findTeamLineup(e.teamLineupId) : null
+            const expanded = open === e.id
+            return (
+              <div key={e.id} className="border-b border-rule-2 last:border-b-0">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{e.name}</div>
+                    <div className="mt-0.5 text-xs text-ink-2">
+                      {knockout ? 'トーナメント' : 'ブロック戦'}
+                      {lineup ? ` ・ ${lineup.label}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setOpen(expanded ? null : e.id)}
+                    className="shrink-0 rounded border border-rule px-3 text-xs text-ink-2"
+                    style={{ minHeight: 44 }}
+                    aria-expanded={expanded}
+                  >
+                    {expanded ? '閉じる' : '変える'}
+                  </button>
+                </div>
+
+                {expanded && (
+                  <div className="border-t border-rule-2 bg-rule-2/30 px-3 py-3">
+                    <FormatChoice
+                      label="進め方"
+                      hint="総当たりで順位を出すか、勝ち上がりで1位を決めるか"
+                      options={[
+                        { id: 'ROUND_ROBIN', label: 'ブロック戦' },
+                        { id: 'SINGLE_ELIMINATION', label: 'トーナメント' },
+                      ]}
+                      value={knockout ? 'SINGLE_ELIMINATION' : 'ROUND_ROBIN'}
+                      disabled={busy}
+                      onPick={(v) => onChangeFormat(e.id, { stageType: v as StageType })}
+                    />
+                    <FormatChoice
+                      label="1対戦の組み方"
+                      hint="団体戦は1対戦が複数の試合に分かれる。個人戦なら「個人戦」のまま"
+                      options={[
+                        { id: '', label: '個人戦' },
+                        ...TEAM_LINEUP_PRESETS.map((x) => ({ id: x.id, label: x.label })),
+                      ]}
+                      value={e.teamLineupId ?? ''}
+                      disabled={busy}
+                      onPick={(v) => onChangeFormat(e.id, { teamLineupId: v === '' ? null : v })}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -410,11 +518,56 @@ function EventsStep({
           'w-full rounded py-3 font-bold ' +
           (events.length === 0 ? 'bg-rule text-ink-3' : 'bg-primary text-paper')
         }
-        style={{ minHeight: 52 }}
+        style={{ minHeight: 48 }}
       >
         次へ（{events.length}種目）
       </button>
     </section>
+  )
+}
+
+/** 選択肢を横に並べる。選んだものは枠と文字で示す（色だけに頼らない）。 */
+function FormatChoice({
+  label,
+  hint,
+  options,
+  value,
+  disabled,
+  onPick,
+}: {
+  label: string
+  hint: string
+  options: { id: string; label: string }[]
+  value: string
+  disabled: boolean
+  onPick: (id: string) => void
+}) {
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="text-xs font-semibold">{label}</div>
+      <div className="mb-1.5 text-xs text-ink-3">{hint}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = o.id === value
+          return (
+            <button
+              key={o.id}
+              disabled={disabled}
+              onClick={() => onPick(o.id)}
+              aria-pressed={on}
+              className={
+                'rounded border px-3 text-xs ' +
+                (on ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-rule')
+              }
+              style={{ minHeight: 44 }}
+            >
+              {on ? '✓ ' : ''}
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

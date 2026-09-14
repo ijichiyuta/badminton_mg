@@ -561,6 +561,26 @@ function unresolved(
 ): RankedEntry[] {
   const action = ctx.rule.unresolvedAction
 
+  // **まだ1試合も行われていない集団を抽選に落としてはならない。**
+  // 「すべての基準で並んだため抽選で決定しました」と出てしまい、
+  // 大会が始まる前の画面に、行われていない抽選の結果が並ぶことになる。
+  const played = tied.reduce((n, id) => n + (overall.get(id)?.played ?? 0), 0)
+  const anyResult = tied.some((id) => {
+    const s = overall.get(id)
+    return (s?.wins ?? 0) + (s?.losses ?? 0) > 0
+  })
+  if (played === 0 && !anyResult) {
+    return tied.map((id) => {
+      const s = overall.get(id) ?? emptyStats(id)
+      return {
+        rank: startRank,
+        entryId: id,
+        stats: s,
+        reason: 'まだ試合が行われていません',
+      }
+    })
+  }
+
   const sharedRank = (ids: string[], rank: number, why: string): RankedEntry[] =>
     ids.map((id) => {
       const s = overall.get(id) ?? emptyStats(id)

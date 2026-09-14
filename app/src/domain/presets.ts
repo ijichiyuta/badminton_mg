@@ -450,6 +450,15 @@ export const TEAM_LINEUP_PRESETS: TeamLineup[] = [
 /** 愛知の社会人リーグ（男女一般）と同じ。最も広く使われている形。 */
 export const DEFAULT_TEAM_LINEUP_ID = '2d1s'
 
+/**
+ * 団体戦の順位決定の既定。
+ *
+ * 「勝敗 → マッチ得失率 → ゲーム得失率 → ポイント得失率」。
+ * 先頭の勝敗は**対戦単位**で、2番目のマッチ得失率は**マッチ単位**。階層が違う。
+ * 個人戦の既定をそのまま当てると、この2つが同じ値になって第2基準が働かない。
+ */
+export const DEFAULT_TEAM_RANKING_PRESET_ID = 'team-league-aichi'
+
 export function findTeamLineup(id: string): TeamLineup | undefined {
   return TEAM_LINEUP_PRESETS.find((x) => x.id === id)
 }

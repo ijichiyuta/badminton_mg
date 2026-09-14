@@ -196,6 +196,9 @@ function OperatorApp() {
               rule={rule}
               idx={idx}
               matchCount={matches.length}
+              siblings={
+                current.tieId ? matches.filter((m) => m.tieId === current.tieId) : []
+              }
               onSubmit={submit}
               onRetire={(side) => void retire(side)}
               onClear={() => void app.clearResult(current.id)}
@@ -207,6 +210,7 @@ function OperatorApp() {
         {tab === 'standings' && (
           <StandingsScreen
             groups={app.data.groups}
+            stages={app.data.stages}
             matches={matches}
             rules={app.data.scoringRules}
             idx={idx}
@@ -235,6 +239,7 @@ function OperatorApp() {
           <SetupScreen
             tournament={t}
             events={app.data.events}
+            stages={app.data.stages}
             groups={app.data.groups}
             idx={idx}
             actions={app.setupActions}

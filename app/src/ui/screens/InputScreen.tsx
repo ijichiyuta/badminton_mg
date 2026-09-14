@@ -37,6 +37,8 @@ interface Props {
   onClear: () => void
   onPickNumber: (n: number) => void
   matchCount: number
+  /** 同じ対戦（Tie）の試合。団体戦のときだけ中身が入る。 */
+  siblings: MatchRecord[]
 }
 
 /**
@@ -53,6 +55,7 @@ export function InputScreen({
   onClear,
   onPickNumber,
   matchCount,
+  siblings,
 }: Props) {
   const [view, dispatch] = useReducer(
     scoreInputReducer,
@@ -65,6 +68,20 @@ export function InputScreen({
   const sum = summarize(view)
   const nameA = idx.entryLabel(match.entryIds[0])
   const nameB = idx.entryLabel(match.entryIds[1])
+
+  // 団体戦のとき、この対戦がいまどこまで進んでいるか。
+  const tie = (() => {
+    if (!match.tieId) return null
+    const ms = siblings
+    if (ms.length === 0) return null
+    const a = ms.filter((m) => m.winnerEntryId === match.entryIds[0]).length
+    const b = ms.filter((m) => m.winnerEntryId === match.entryIds[1]).length
+    const doneCount = ms.filter((m) => m.status === 'COMPLETED').length
+    const lead = a === b ? (a === 0 ? null : `${a}－${b}`) : `${nameA} ${a}－${b}`
+    return { total: ms.length, doneCount, lead }
+  })()
+
+  const roundName = match.scheduledAt === null && match.round > 0 ? `${match.round}回戦` : null
 
   const key = (label: string, onPress: () => void, kind: 'num' | 'act' = 'num') => (
     <button
@@ -125,9 +142,27 @@ export function InputScreen({
           </span>
           <span className="text-sm text-ink-2">{idx.blockLabel(match.groupId)}</span>
           <span className="ml-auto text-sm text-ink-2 tabular">
-            {match.scheduledAt} / {match.courtId?.replace('c', '')}番コート
+            {match.scheduledAt
+              ? `${match.scheduledAt} / ${match.courtId?.replace('c', '') ?? '－'}番コート`
+              : roundName ?? ''}
           </span>
         </div>
+
+        {/*
+          団体戦では、対戦のどの枠かが分からないと入力できない。
+          スコアシートにも同じ文字が刷ってある。
+        */}
+        {match.lineupSlot && (
+          <div className="mb-2 flex items-center gap-2 rounded border border-rule bg-rule-2/40 px-3 py-1.5">
+            <span className="text-sm font-semibold">{match.lineupSlot}</span>
+            {tie && (
+              <span className="ml-auto text-xs text-ink-2 tabular">
+                この対戦 {tie.doneCount}／{tie.total} 試合
+                {tie.lead ? ` ・ ${tie.lead}` : ''}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 対戦者 */}
         <div className="mb-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">

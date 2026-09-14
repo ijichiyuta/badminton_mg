@@ -267,3 +267,56 @@ describe('勝ち上がり', () => {
     expect(nextTie.every((x) => x.entryIds[0] === tie[0].entryIds[0])).toBe(true)
   })
 })
+
+describe('トーナメントはブロックに割らない', () => {
+  it('**出場者全員が1つのドローに入る**', async () => {
+    const { st } = await setup(13)
+    const groups = await d.groups.where({ stageId: st.id }).toArray()
+    expect(groups).toHaveLength(1)
+    expect(groups[0].entryIds).toHaveLength(13)
+    expect(groups[0].name).toBe('本戦')
+  })
+
+  it('13人なら12試合。小さなトーナメントに割れない', async () => {
+    const { matches } = await setup(13)
+    expect(matches.filter((m) => m.resultType !== 'BYE')).toHaveLength(12)
+  })
+
+  it('リーグは今までどおりブロックに割る', async () => {
+    const t = await createTournament(
+      { name: 'リーグ', date: '2026-09-06', venue: '体育館', organizer: 'テスト', courtCount: 4 },
+      d,
+    )
+    const ev = await addEvent(
+      t.id,
+      { name: '男子ダブルス', discipline: 'MD', category: '', entryType: 'PAIR', scoringRuleId: null, rankingRulePresetId: null },
+      d,
+    )
+    const st = await addStage(t.id, ev.id, { name: 'ブロック戦', type: 'ROUND_ROBIN' }, d)
+    await addEntries(
+      t.id,
+      ev.id,
+      Array.from({ length: 12 }, (_, i) => ({ playerNames: [`甲${i}`, `乙${i}`], affiliation: `${i % 3}会` })),
+      d,
+    )
+    await buildGroups({ stageId: st.id, perGroup: 4, drawSeed: 1 }, d)
+    const groups = await d.groups.where({ stageId: st.id }).toArray()
+    expect(groups.length).toBeGreaterThan(1)
+  })
+
+  it('抽選をやり直すとドローが変わる', async () => {
+    const { st, ev, t } = await setup(13)
+    const before = (await d.matches.where({ stageId: st.id }).toArray())
+      .filter((m) => m.round === 1)
+      .map((m) => m.entryIds.join('|'))
+      .sort()
+    await buildGroups({ stageId: st.id, groupCount: 1, drawSeed: 999 }, d)
+    await buildMatches(t.id, SCHEDULE, d)
+    const after = (await d.matches.where({ stageId: st.id }).toArray())
+      .filter((m) => m.round === 1)
+      .map((m) => m.entryIds.join('|'))
+      .sort()
+    expect(after).not.toEqual(before)
+    void ev
+  })
+})

@@ -449,3 +449,28 @@ describe('停止性', () => {
     expect(r.entries).toHaveLength(6)
   })
 })
+
+describe('まだ試合が行われていないとき', () => {
+  const rule = ranking({ criteria: ['wins', 'gameRatio', 'pointDiff'], unresolvedAction: 'DRAW' })
+
+  it('**抽選に落とさない。**行われていない抽選の結果を表示しない', () => {
+    const r = rank({ entryIds: ['A', 'B', 'C', 'D'], matches: [], rule })
+    expect(r.warnings.some((w) => w.kind === 'DRAW_USED')).toBe(false)
+    for (const e of r.entries) expect(e.reason).toBe('まだ試合が行われていません')
+  })
+
+  it('全員が同順位になる', () => {
+    const r = rank({ entryIds: ['A', 'B', 'C', 'D'], matches: [], rule })
+    expect(new Set(r.entries.map((e) => e.rank)).size).toBe(1)
+  })
+
+  it('1試合でも終わっていれば、これまでどおり判定する', () => {
+    const r = rank({
+      entryIds: ['A', 'B', 'C', 'D'],
+      matches: [mk('A', 'B', [[15, 9], [15, 11]])],
+      rule,
+    })
+    expect(r.entries[0].entryId).toBe('A')
+    expect(r.entries[0].reason).not.toBe('まだ試合が行われていません')
+  })
+})

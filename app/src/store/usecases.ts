@@ -11,6 +11,7 @@ import {
   DEFAULT_RANKING_PRESET_ID,
   DEFAULT_SCORING_PRESET_ID,
   findTeamLineup,
+  DEFAULT_TEAM_RANKING_PRESET_ID,
 } from '../domain/presets'
 import { rank, type RankingContext } from '../domain/ranking'
 import { buildSchedule, type ScheduleBlock, type ScheduleOptions } from '../domain/schedule'
@@ -119,8 +120,15 @@ export async function addEvent(
   d: BadmintonDb = db(),
 ): Promise<EventRecord> {
   const count = await d.events.where({ tournamentId }).count()
+  // 団体戦は数える単位が個人戦と違う。勝敗は対戦（Tie）、得失率はマッチ。
+  // 大会の既定（個人戦向け）を引きずると、要項の第2基準が第1基準と同じ値になって死ぬ。
+  // **呼び出し元がどこであってもここで決まる**ようにしておく。
+  const rankingRulePresetId =
+    input.rankingRulePresetId ??
+    (input.entryType === 'TEAM' ? DEFAULT_TEAM_RANKING_PRESET_ID : null)
   const rec: EventRecord = {
     ...input,
+    rankingRulePresetId,
     id: newId('ev'),
     tournamentId,
     order: input.order ?? count + 1,
@@ -227,13 +235,20 @@ export async function buildGroups(
   if (!stage) throw new Error(`ステージが見つかりません: ${input.stageId}`)
 
   const entries = await d.entries.where({ eventId: stage.eventId }).toArray()
-  const result = splitIntoGroups(entries as Entry[], {
-    groupCount: input.groupCount,
-    perGroup: input.perGroup,
-    remainderPolicy: input.remainderPolicy,
-    separateSameAffiliation: input.separateSameAffiliation ?? true,
-    drawSeed: input.drawSeed,
-  })
+
+  // **トーナメントはブロックに割らない。**出場者全員が1つのドローに入る。
+  // リーグ用の「1ブロック何組」をそのまま当てると、13人の選手権が
+  // 4人ずつの小さなトーナメント4つに割れてしまう。
+  const result =
+    stage.type === 'SINGLE_ELIMINATION'
+      ? { groups: [entries.map((e) => e.id)], warnings: [] }
+      : splitIntoGroups(entries as Entry[], {
+          groupCount: input.groupCount,
+          perGroup: input.perGroup,
+          remainderPolicy: input.remainderPolicy,
+          separateSameAffiliation: input.separateSameAffiliation ?? true,
+          drawSeed: input.drawSeed,
+        })
 
   const groups: GroupRecord[] = result.groups.map((entryIds, i) => ({
     id: newId('gr'),
@@ -241,10 +256,15 @@ export async function buildGroups(
     eventId: stage.eventId,
     stageId: stage.id,
     order: i + 1,
-    name: `${String.fromCharCode(0x41 + i)}組`,
+    name: stage.type === 'SINGLE_ELIMINATION' ? '本戦' : `${String.fromCharCode(0x41 + i)}組`,
     entryIds,
     scoringRuleId: null,
   }))
+
+  if (stage.type === 'SINGLE_ELIMINATION') {
+    // 抽選をやり直したら、ドローも変わらなければ意味がない。
+    await d.stages.put({ ...stage, options: { ...stage.options, drawSeed: input.drawSeed } })
+  }
 
   await d.transaction('rw', [d.groups, d.matches], async () => {
     // 確定前のやり直しなので、既存の組と試合をまとめて捨てる。
@@ -722,8 +742,15 @@ export async function standings(
   const scoringRules = await d.scoringRules.where({ tournamentId: group.tournamentId }).toArray()
   const t = await d.tournaments.get(group.tournamentId)
 
-  const rule =
-    rules.find((r) => r.id === t?.defaultRankingRulePresetId) ?? rules[0] ?? defaultRankingRule()
+  // 順位の基準は **種目 → 大会** の順で解決する。
+  // 同じ大会でも、団体戦と個人戦では数える単位が違うので基準も違う。
+  const ev = await d.events.get(group.eventId)
+  const preset = ev?.rankingRulePresetId
+    ? findRankingPreset(ev.rankingRulePresetId)
+    : undefined
+  const rule = preset
+    ? (({ label: _l, wording: _w, ...r }) => r)(preset)
+    : (rules.find((r) => r.id === t?.defaultRankingRulePresetId) ?? rules[0] ?? defaultRankingRule())
 
   const ctx: RankingContext = {
     entryIds: group.entryIds,

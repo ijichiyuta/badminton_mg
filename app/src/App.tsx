@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEMO_TOURNAMENT_NAME } from './ui/demo'
 import { HomeScreen } from './ui/screens/HomeScreen'
 import { ShareScreen } from './ui/screens/ShareScreen'
+import { TabBar } from './ui/TabBar'
 import { InputScreen } from './ui/screens/InputScreen'
 import { StandingsScreen } from './ui/screens/StandingsScreen'
 import { PrintScreen } from './ui/screens/PrintScreen'
@@ -286,27 +287,7 @@ function OperatorApp() {
         />
       )}
 
-      <nav className="grid grid-cols-6 border-t border-rule no-print">
-        {TABS.map((x) => (
-          <button
-            key={x.id}
-            onClick={() => setTab(x.id)}
-            className={
-              'py-2 text-xs ' +
-              (tab === x.id ? 'font-bold text-primary' : 'text-ink-2')
-            }
-            style={{ minHeight: 52 }}
-          >
-            <span
-              className={
-                'block border-t-2 pt-1 ' + (tab === x.id ? 'border-primary' : 'border-transparent')
-              }
-            >
-              {x.label}
-            </span>
-          </button>
-        ))}
-      </nav>
+      <TabBar tabs={TABS} current={tab} onChange={setTab} />
     </div>
   )
 }

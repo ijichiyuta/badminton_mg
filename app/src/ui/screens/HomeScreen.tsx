@@ -19,12 +19,26 @@ interface Props {
   }
   onChooseFile: () => void
   onExport: () => void
+  /** いま開いているのが見本の大会か。 */
+  isDemo: boolean
+  /** 自分の大会を作る画面へ。 */
+  onStart: () => void
 }
 
 /** 結果が入っていないまま時間が経った試合とみなす閾値（枠数）。 */
 const STALE_SLOTS = 1
 
-export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChooseFile, onExport }: Props) {
+export function HomeScreen({
+  matches,
+  idx,
+  courtCount,
+  onOpenMatch,
+  save,
+  onChooseFile,
+  onExport,
+  isDemo,
+  onStart,
+}: Props) {
   const done = matches.filter((m) => m.status === 'COMPLETED')
   const pending = matches.filter((m) => m.status !== 'COMPLETED')
 
@@ -51,6 +65,28 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3">
+      {/*
+        初めて開いた人は、入っている見本を自分の大会だと思う。
+        **何より先に、これが見本だと伝える。**
+        触って試してもらうために消しはしない。自分の大会を作れば自然に置き換わる。
+      */}
+      {isDemo && (
+        <div className="mb-3 rounded border border-warn bg-warn-soft px-3 py-3">
+          <div className="text-sm font-bold text-warn">これは操作を試すための見本です</div>
+          <div className="mt-1 text-sm text-ink-2">
+            ここに出ている大会・選手・試合はすべて架空のものです。
+            自由に触って確かめてください。何をしても壊れません。
+          </div>
+          <button
+            onClick={onStart}
+            className="mt-3 w-full rounded bg-primary py-3 text-base font-bold text-paper"
+            style={{ minHeight: 52 }}
+          >
+            自分の大会を作る
+          </button>
+        </div>
+      )}
+
       {pending.length === 0 ? (
         <div className="rounded border border-ok bg-ok-soft px-3 py-6 text-center">
           <div className="text-lg font-bold text-ok">すべて入力済みです</div>
@@ -85,8 +121,8 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
       )}
 
       <Section
-        title="データの保存先"
-        note={save.linked ? 'ファイルに自動保存中' : '保存先が未設定'}
+        title="記録の控え"
+        note={save.linked ? '自動で控えを取っています' : 'まだ控えを取っていません'}
         warn={!save.linked}
       >
         {save.linked ? (
@@ -96,7 +132,7 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
               <span className="min-w-0 truncate font-medium">{save.fileName}</span>
             </div>
             <div className="mt-0.5 text-xs text-ink-2">
-              1試合入れるたびに書き込んでいます
+              1試合入れるたびに、このファイルへ自動で書いています
               {save.lastWrittenAt && ` · 最終 ${save.lastWrittenAt.slice(11, 16)}`}
             </div>
           </div>
@@ -104,8 +140,8 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
           <div className="text-sm">
             <p className="mb-2 text-ink-2">
               {save.supported
-                ? 'いまのデータはブラウザの中だけにあります。保存先のファイルを決めると、1試合ごとに自動で書き込みます。'
-                : 'このブラウザはファイルへの自動保存に対応していません（Chrome / Edge なら対応）。ときどき書き出してください。'}
+                ? '入れた結果はこの端末に残ります。控えのファイルを1つ決めておくと、1試合ごとに自動で書き写します。USBメモリでもパソコンの中でもかまいません。'
+                : 'このブラウザは自動の書き写しに対応していません（Chrome か Edge なら対応）。ときどき「いま控えを取る」を押してください。'}
             </p>
             <div className="flex flex-wrap gap-2">
               {save.supported && (
@@ -114,7 +150,7 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
                   className="rounded bg-primary px-4 font-bold text-paper"
                   style={{ minHeight: 44 }}
                 >
-                  保存先を決める
+                  控えの置き場所を決める
                 </button>
               )}
               <button
@@ -122,7 +158,7 @@ export function HomeScreen({ matches, idx, courtCount, onOpenMatch, save, onChoo
                 className="rounded border border-rule px-4"
                 style={{ minHeight: 44 }}
               >
-                いま書き出す
+                いま控えを取る
               </button>
             </div>
           </div>

@@ -4,7 +4,9 @@
 // 破壊的操作は確認ダイアログではなく Undo トーストで守る（UX原則3）。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { DEMO_TOURNAMENT_NAME } from './ui/demo'
 import { HomeScreen } from './ui/screens/HomeScreen'
+import { ShareScreen } from './ui/screens/ShareScreen'
 import { InputScreen } from './ui/screens/InputScreen'
 import { StandingsScreen } from './ui/screens/StandingsScreen'
 import { PrintScreen } from './ui/screens/PrintScreen'
@@ -45,6 +47,7 @@ function OperatorApp() {
   const idx = useIndexes(app.data)
   const [tab, setTab] = useState<Tab>('home')
   const [currentId, setCurrentId] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
   const [size, setSize] = useState<TextSize>('normal')
 
   useEffect(() => {
@@ -119,6 +122,17 @@ function OperatorApp() {
   }
 
   const t = app.data.tournament
+
+  // 参加者にリンクを渡す画面。公開したあとだけ開ける。
+  if (sharing && app.publishState.url) {
+    return (
+      <ShareScreen
+        url={app.publishState.url}
+        tournamentName={t.name}
+        onBack={() => setSharing(false)}
+      />
+    )
+  }
   const courtCount = t.courts.length
   const rule =
     app.data.scoringRules.find((r) => r.id === current?.scoringRuleId) ??
@@ -159,6 +173,15 @@ function OperatorApp() {
                     : '速報を公開'}
             </button>
           )}
+          {app.publishState.url && (
+            <button
+              onClick={() => setSharing(true)}
+              className="shrink-0 rounded border border-primary px-2 text-xs text-primary"
+              style={{ minHeight: 40 }}
+            >
+              配る
+            </button>
+          )}
           {(['small', 'normal', 'large'] as TextSize[]).map((s, i) => (
             <button
               key={s}
@@ -179,6 +202,8 @@ function OperatorApp() {
       <main className="min-h-0 flex-1">
         {tab === 'home' && (
           <HomeScreen
+            isDemo={t.name === DEMO_TOURNAMENT_NAME}
+            onStart={() => setTab('setup')}
             matches={matches}
             idx={idx}
             courtCount={courtCount}
@@ -295,7 +320,9 @@ function Toast({
   onDismiss: () => void
 }) {
   useEffect(() => {
-    const id = setTimeout(onDismiss, 5000)
+    // **12秒。**5秒では、紙から目を上げて画面を見るまでに消えてしまう。
+    // 取り消しは確認ダイアログの代わりなので、気づけない長さでは意味がない。
+    const id = setTimeout(onDismiss, 12000)
     return () => clearTimeout(id)
   }, [message, onDismiss])
 

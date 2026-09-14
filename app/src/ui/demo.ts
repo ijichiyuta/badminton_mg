@@ -42,6 +42,9 @@ function name(i: number, female: boolean): string {
   return `${f} ${g}`
 }
 
+/** この名前の大会は見本として扱う。画面で「自分の大会ではない」と伝えるのに使う。 */
+export const DEMO_TOURNAMENT_NAME = '見本の大会'
+
 export interface DemoSection {
   eventName: string
   category: string
@@ -70,7 +73,7 @@ export async function seedDemo(
 ): Promise<TournamentRecord> {
   const t = await createTournament(
     {
-      name: 'デモ大会',
+      name: DEMO_TOURNAMENT_NAME,
       date: '2026-09-06',
       venue: '市民体育館',
       organizer: 'デモ',

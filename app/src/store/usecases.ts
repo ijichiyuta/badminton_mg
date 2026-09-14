@@ -375,13 +375,15 @@ export async function enterResult(
       j.winner === 'A' ? before.entryIds[0] : j.winner === 'B' ? before.entryIds[1] : null
   }
 
+  // 勝者を持たないのは NOT_PLAYED と DOUBLE_WALKOVER の2つだけ。
+  // DOUBLE_WALKOVER は勝者がいなくても**確定**している（両者の負けとして成績に効く）。
+  const noWinner = resultType === 'NOT_PLAYED' || resultType === 'DOUBLE_WALKOVER'
   const after: MatchRecord = {
     ...before,
     games: input.games,
     resultType,
-    // NOT_PLAYED だけが勝者を持たない（不変条件2）。
-    status: resultType === 'NOT_PLAYED' || winnerEntryId !== null ? 'COMPLETED' : before.status,
-    winnerEntryId: resultType === 'NOT_PLAYED' ? null : winnerEntryId,
+    status: noWinner || winnerEntryId !== null ? 'COMPLETED' : before.status,
+    winnerEntryId: noWinner ? null : winnerEntryId,
     retiredEntryId: input.retiredEntryId ?? null,
     completedAt: now(),
   }

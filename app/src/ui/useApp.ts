@@ -147,6 +147,44 @@ export function useApp() {
     [load, syncFile],
   )
 
+  /**
+   * 棄権を記録する。
+   *
+   * 運営者に「不戦勝」と「途中棄権」を選ばせない。**スコアが入っているかで決まる**。
+   * 入っていなければ不戦勝、入っていれば途中棄権。要項上の扱いも実際そうなっている。
+   *
+   * 実データ（愛知社会人リーグ 355対戦中45件、新人戦 925試合中38件）では
+   * 棄権は1割前後で起きる。例外処理ではなく日常の操作として置く。
+   */
+  const enterRetirement = useCallback(
+    async (matchId: string, side: 'A' | 'B' | 'BOTH') => {
+      const d = db()
+      const m = await d.matches.get(matchId)
+      if (!m) return
+      const [a, b] = m.entryIds
+      const played = m.games.length > 0
+
+      const input =
+        side === 'BOTH'
+          ? { matchId, games: [], resultType: 'DOUBLE_WALKOVER' as const, winnerEntryId: null }
+          : {
+              matchId,
+              // 途中棄権は、そこまでのスコアを残す。不戦勝はスコアを持たない。
+              games: played ? m.games : [],
+              resultType: (played ? 'RETIRED' : 'WALKOVER') as ResultType,
+              retiredEntryId: side === 'A' ? a : b,
+              // **自動判定に任せない。**途中棄権のスコアは通常の勝敗判定では決着しない。
+              winnerEntryId: side === 'A' ? b : a,
+            }
+
+      const { operation } = await enterResultUseCase(input)
+      await load()
+      setToast({ message: operation.label, operationId: operation.id })
+      void syncFile(m.tournamentId)
+    },
+    [load, syncFile],
+  )
+
   /** 保存先を選ぶ。1回だけ。以降は黙って上書きする。 */
   const chooseFile = useCallback(async () => {
     if (!data) return
@@ -320,6 +358,7 @@ export function useApp() {
     error,
     saveState,
     enterResult,
+    enterRetirement,
     clearResult,
     undo,
     undoLast,

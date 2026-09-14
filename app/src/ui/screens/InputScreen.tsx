@@ -17,11 +17,23 @@ import type { MatchRecord, ScoringRuleRecord } from '../../store/schema'
 import type { Game } from '../../domain/types'
 import type { Indexes } from '../useApp'
 
+/** 通常以外の結果種別の言い方。色だけで状態を伝えないため、文字でも出す。 */
+const RESULT_LABEL: Record<string, string> = {
+  BYE: '不戦勝（対戦相手なし）',
+  WALKOVER: '不戦勝（相手が棄権）',
+  RETIRED: '途中棄権',
+  WITHDRAWN: '欠場',
+  DISQUALIFIED: '失格',
+  DOUBLE_WALKOVER: '両者棄権（双方の負け）',
+  NOT_PLAYED: '試合なし',
+}
+
 interface Props {
   match: MatchRecord
   rule: ScoringRuleRecord
   idx: Indexes
   onSubmit: (games: Game[]) => void
+  onRetire: (side: 'A' | 'B' | 'BOTH') => void
   onClear: () => void
   onPickNumber: (n: number) => void
   matchCount: number
@@ -32,13 +44,23 @@ interface Props {
  * 試合が変わったら作り直す。中途半端に state をリセットするより確実で、
  * 入力途中の値が別の試合に混ざる事故が起きない。
  */
-export function InputScreen({ match, rule, idx, onSubmit, onClear, onPickNumber, matchCount }: Props) {
+export function InputScreen({
+  match,
+  rule,
+  idx,
+  onSubmit,
+  onRetire,
+  onClear,
+  onPickNumber,
+  matchCount,
+}: Props) {
   const [view, dispatch] = useReducer(
     scoreInputReducer,
     undefined,
     () => initScoreInput(rule, match.games),
   )
   const [numberDraft, setNumberDraft] = useState('')
+  const [retireOpen, setRetireOpen] = useState(false)
 
   const sum = summarize(view)
   const nameA = idx.entryLabel(match.entryIds[0])
@@ -165,18 +187,89 @@ export function InputScreen({ match, rule, idx, onSubmit, onClear, onPickNumber,
           </div>
         )}
 
+        {/*
+          棄権。実データでは1割前後で起きるので、隠さず同じ画面に置く。
+          ただし平時は1行に畳んでおく（docs/15-ui-ux.md の段階的開示）。
+
+          **「不戦勝」と「途中棄権」を運営者に選ばせない。**
+          スコアが入っていなければ不戦勝、入っていれば途中棄権と決まる。
+        */}
+        {match.status !== 'COMPLETED' && (
+          <div className="mt-3">
+            {!retireOpen ? (
+              <button
+                onClick={() => setRetireOpen(true)}
+                className="w-full rounded border border-rule py-2 text-sm text-ink-2"
+                style={{ minHeight: 44 }}
+              >
+                棄権・不戦勝を記録する
+              </button>
+            ) : (
+              <div className="rounded border border-rule p-2">
+                <div className="px-1 pb-2 text-xs text-ink-3">
+                  {sum.games.length > 0
+                    ? 'ここまでのスコアを残して「途中棄権」として記録します'
+                    : 'スコアなしの「不戦勝」として記録します'}
+                </div>
+                <div className="grid gap-2">
+                  <button
+                    onClick={() => onRetire('A')}
+                    className="w-full rounded border border-rule px-3 py-2 text-left text-sm"
+                    style={{ minHeight: 44 }}
+                  >
+                    <b>{nameA}</b> が棄権 <span className="text-ink-3">→ {nameB} の勝ち</span>
+                  </button>
+                  <button
+                    onClick={() => onRetire('B')}
+                    className="w-full rounded border border-rule px-3 py-2 text-left text-sm"
+                    style={{ minHeight: 44 }}
+                  >
+                    <b>{nameB}</b> が棄権 <span className="text-ink-3">→ {nameA} の勝ち</span>
+                  </button>
+                  <button
+                    onClick={() => onRetire('BOTH')}
+                    className="w-full rounded border border-rule px-3 py-2 text-left text-sm text-ink-2"
+                    style={{ minHeight: 44 }}
+                  >
+                    両者とも棄権 <span className="text-ink-3">→ 双方の負け</span>
+                  </button>
+                  <button
+                    onClick={() => setRetireOpen(false)}
+                    className="w-full py-2 text-sm text-ink-3"
+                    style={{ minHeight: 44 }}
+                  >
+                    やめる
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {match.status === 'COMPLETED' && (
-          <button
-            onClick={onClear}
-            className="mt-3 w-full rounded border border-rule py-2 text-sm text-ink-2"
-            style={{ minHeight: 44 }}
-          >
-            この試合の結果を取り消す
-          </button>
+          <div className="mt-3">
+            {match.resultType !== 'NORMAL' && (
+              <div className="mb-2 border-l-4 border-warn bg-warn-soft px-3 py-2 text-sm">
+                {RESULT_LABEL[match.resultType]}として記録されています
+              </div>
+            )}
+            <button
+              onClick={onClear}
+              className="w-full rounded border border-rule py-2 text-sm text-ink-2"
+              style={{ minHeight: 44 }}
+            >
+              この試合の結果を取り消す
+            </button>
+          </div>
         )}
       </div>
 
-      {/* テンキー。画面下部に固定。片手で届く */}
+      {/*
+        テンキー。画面下部に固定。片手で届く。
+        棄権パネルを開いている間は出さない。数字を打つ場面ではないうえ、
+        固定表示のままだと選択肢が隠れてしまう。
+      */}
+      {!retireOpen && (
       <div className="border-t border-rule bg-rule-2/40 p-2 no-print">
         <div className="grid grid-cols-4 gap-2">
           {[1, 2, 3].map((n) => key(String(n), () => dispatch({ type: 'DIGIT', digit: n })))}
@@ -199,6 +292,7 @@ export function InputScreen({ match, rule, idx, onSubmit, onClear, onPickNumber,
           </button>
         </div>
       </div>
+      )}
     </div>
   )
 }

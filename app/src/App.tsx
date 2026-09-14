@@ -78,6 +78,20 @@ function OperatorApp() {
     [app, current, matches],
   )
 
+  /** 棄権も確定と同じ扱い。記録したら次の未入力試合へ進む。 */
+  const retire = useCallback(
+    async (side: 'A' | 'B' | 'BOTH') => {
+      if (!current) return
+      await app.enterRetirement(current.id, side)
+      const after = matches
+        .filter((m) => m.status !== 'COMPLETED' && m.id !== current.id)
+        .sort((a, b) => (a.number ?? 0) - (b.number ?? 0))
+      const next = after.find((m) => (m.number ?? 0) > (current.number ?? 0)) ?? after[0] ?? null
+      setCurrentId(next?.id ?? null)
+    },
+    [app, current, matches],
+  )
+
   const pickByNumber = useCallback(
     (n: number) => {
       const m = matches.find((x) => x.number === n)
@@ -183,6 +197,7 @@ function OperatorApp() {
               idx={idx}
               matchCount={matches.length}
               onSubmit={submit}
+              onRetire={(side) => void retire(side)}
               onClear={() => void app.clearResult(current.id)}
               onPickNumber={pickByNumber}
             />

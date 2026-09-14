@@ -236,7 +236,21 @@ export function countsTowardRatios(match: Match): boolean {
   return match.resultType !== 'BYE' && match.resultType !== 'NOT_PLAYED'
 }
 
-/** 勝敗としてカウントすべき試合か。NOT_PLAYED のみ勝者を持たない。 */
+/**
+ * 勝者を持つ試合か。
+ *
+ * 勝者を持たないのは NOT_PLAYED（成績に影響しない）と
+ * DOUBLE_WALKOVER（両者の負けとして成績に影響する）の2つだけ。
+ */
 export function hasWinner(match: Match): boolean {
-  return match.status === 'COMPLETED' && match.resultType !== 'NOT_PLAYED'
+  return (
+    match.status === 'COMPLETED' &&
+    match.resultType !== 'NOT_PLAYED' &&
+    match.resultType !== 'DOUBLE_WALKOVER'
+  )
+}
+
+/** 両者とも現れず、双方の負けになる試合か。 */
+export function isDoubleWalkover(match: Match): boolean {
+  return match.status === 'COMPLETED' && match.resultType === 'DOUBLE_WALKOVER'
 }

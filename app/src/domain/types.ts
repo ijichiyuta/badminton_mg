@@ -54,6 +54,14 @@ export type ResultType =
   | 'RETIRED'
   | 'WITHDRAWN'
   | 'DISQUALIFIED'
+  /**
+   * 両者とも現れなかった。**双方の負けとして数える。**
+   *
+   * 愛知県社会人クラブリーグの速報で「△Ｘ－Ｘ」と表示される状態。
+   * 公表集計では両チームにマッチ0-3・ゲーム0-6・ポイント0-126 が付く。
+   * 勝者がいない点は NOT_PLAYED と同じだが、**成績には影響する**ので別の型にする。
+   */
+  | 'DOUBLE_WALKOVER'
   | 'NOT_PLAYED'
 
 export interface Game {

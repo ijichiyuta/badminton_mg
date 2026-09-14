@@ -159,7 +159,9 @@ describe('順位決定エンジンが公表順位を再現する', () => {
   const ctx = (): RankingContext => ({ entryIds: TEAMS, matches, rule })
 
   it('プリセットが要項の文面と対応している', () => {
-    expect(rule.criteria).toEqual(['matchRatio', 'gameRatio', 'pointRatio'])
+    // 要項の「1. 勝敗 2. マッチ得失率 3. ゲーム得失率 4. ポイント得失率」と1対1で対応する。
+    // wins は対戦（Tie）単位、matchRatio はマッチ単位。**階層が違うので両方要る。**
+    expect(rule.criteria).toEqual(['wins', 'matchRatio', 'gameRatio', 'pointRatio'])
     expect(rule.tiebreakScope).toBe('ALL_MATCHES')
     expect(rule.unresolvedAction).toBe('HEAD_TO_HEAD')
   })

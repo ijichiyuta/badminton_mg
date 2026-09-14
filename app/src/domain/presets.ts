@@ -363,8 +363,12 @@ export const RANKING_PRESETS: RankingPreset[] = [
       '勝敗による。以下、マッチ得失率・ゲーム得失率・ポイント得失率による。' +
       'これらで決まらない場合は当事者同士で勝った方を上位とする',
     // 団体戦リーグの標準形。愛知県社会人クラブリーグ 内規14 の文面そのまま。
-    // マッチ率が入るのは「2複1単で1対戦=3マッチ」という団体戦の数え方があるため。
-    criteria: ['matchRatio', 'gameRatio', 'pointRatio'],
+    //
+    // **先頭の wins（対戦＝Tie 単位の勝敗）を落としてはならない。**
+    // 「1. 勝敗による 2. マッチ得失率による」は階層が違う別の基準で、
+    // 6チーム総当たりでも両者の順序が食い違う部が実在する
+    // （男子6部B：Rise は対戦 4勝1敗、SGα は 3勝2敗。マッチ率は両者 8-7 で並ぶ）。
+    criteria: ['wins', 'matchRatio', 'gameRatio', 'pointRatio'],
     tiebreakScope: 'ALL_MATCHES',
     // 「上記で決まらない場合は当事者同士で勝った方」。最後の砦としてだけ当該者間を見る。
     unresolvedAction: 'HEAD_TO_HEAD',

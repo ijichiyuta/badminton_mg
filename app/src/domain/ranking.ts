@@ -6,7 +6,7 @@
 //
 // 外部依存を持たない純粋関数。入力は成績データとルールセット、出力は順位と根拠のみ。
 
-import { countsTowardRatios, hasWinner } from './scoring'
+import { countsTowardRatios, hasWinner, isDoubleWalkover } from './scoring'
 import type {
   Criterion,
   EntryStats,
@@ -71,6 +71,11 @@ function gamesFor(
   rule: RankingRuleSet,
   scoring: ScoringRuleSet | undefined,
 ): { scoreA: number; scoreB: number }[] | null {
+  // 両者とも現れなかった場合。どちらにも「0 - 基準点」を付ける。
+  // 勝者がいないので 21-0 の向きを決められず、0-0 でも済ませられない
+  // （公表集計では双方にポイント0-126 が付いている）。呼び出し側で個別に処理する。
+  if (match.resultType === 'DOUBLE_WALKOVER') return []
+
   if (match.resultType === 'WITHDRAWN' || match.resultType === 'WALKOVER') {
     if (rule.withdrawnHandling === 'EXCLUDE') return null
     if (rule.withdrawnHandling === 'ZERO_ZERO') return []
@@ -98,7 +103,7 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
 
   // 対戦（Tie）単位の勝敗。団体戦では「勝敗」がこちらの単位になる。
   // 個人戦でも同じ器を使い、1マッチ=1Tie として扱う。
-  const ties = new Map<string, { won: Map<string, number>; retired: Set<string> }>()
+  const ties = new Map<string, { won: Map<string, number>; retired: Set<string>; bothLose?: boolean }>()
   const tally = (m: Match, winner: string, loser: string | null) => {
     // tieId がない試合は、その試合自体を1つの Tie とみなす。
     const key = m.tieId ?? m.id
@@ -111,6 +116,20 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
     if (loser !== null && !t.won.has(loser)) t.won.set(loser, 0)
     // 棄権は勝点の扱いが違う。対戦のうち1つでも棄権があればその側に適用する。
     if (isRetirement(m) && m.retiredEntryId) t.retired.add(m.retiredEntryId)
+  }
+  // 両者とも現れなかった対戦。勝者なしで両方に負けを付ける。
+  const loseBoth = (m: Match, a: string, b: string) => {
+    const key = m.tieId ?? m.id
+    let t = ties.get(key)
+    if (!t) {
+      t = { won: new Map(), retired: new Set() }
+      ties.set(key, t)
+    }
+    for (const id of [a, b]) {
+      if (!t.won.has(id)) t.won.set(id, 0)
+      t.retired.add(id)
+    }
+    t.bothLose = true
   }
 
   // 棄権者との対戦を相手の成績からも削除する設定。
@@ -145,10 +164,29 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
     const bIn = set.has(b)
     if (amongOnly ? !(aIn && bIn) : !(aIn || bIn)) continue
 
-    if (!hasWinner(m)) continue
-
     const sA = stats.get(a)
     const sB = stats.get(b)
+
+    // 両者とも現れなかった対戦。双方の負けとして数える。
+    if (isDoubleWalkover(m)) {
+      const scoringD = m.scoringRuleId ? ctx.scoringRules?.[m.scoringRuleId] : undefined
+      const base = scoringD?.pointsPerGame ?? 0
+      const n = scoringD?.gamesToWin ?? 1
+      for (const s of [sA, sB]) {
+        if (!s) continue
+        s.matchesLost++
+        if (ctx.rule.withdrawnHandling === 'EXCLUDE') continue
+        s.played++
+        if (ctx.rule.withdrawnHandling === 'BASE_POINT_TO_ZERO') {
+          s.gamesLost += n
+          s.pointsLost += base * n
+        }
+      }
+      loseBoth(m, a, b)
+      continue
+    }
+
+    if (!hasWinner(m)) continue
 
     // 勝敗は BYE でも数える（不戦勝は1勝）。
     if (m.winnerEntryId === a) {
@@ -194,6 +232,15 @@ export function aggregate(ctx: RankingContext, target: string[], amongOnly: bool
   for (const t of ties.values()) {
     const entries = [...t.won.entries()]
     if (entries.length === 0) continue
+    if (t.bothLose) {
+      for (const [id] of entries) {
+        const s = stats.get(id)
+        if (!s) continue
+        s.losses++
+        s.points += ctx.rule.pointsForRetirement
+      }
+      continue
+    }
     const best = Math.max(...entries.map(([, n]) => n))
     const winners = entries.filter(([, n]) => n === best)
     if (winners.length !== 1) continue
@@ -465,13 +512,14 @@ function resolve(
         const s = g.members[0]
         const full = overall.get(s.entryId) ?? s
         // **順位に応じて言い方を変える。** 最下位に「上回りました」と書いてはならない。
+        // 3集団以上に分かれたときの中ほどは「上回った」とも「下回った」とも言えない。
         const verb =
-          gi === 0 ? '上回りました' : gi === split.length - 1 ? '下回りました' : 'でした'
-        const tail =
-          verb === 'でした'
-            ? `${METRIC_LABEL[c]} ${formatMetric(c, g.value)}`
-            : `${METRIC_LABEL[c]} ${formatMetric(c, g.value)} で${verb}`
-        const reason = `${recordText(full)}。${tiedLabel(tied.length)}のため${scopeLabel}、${tail}`
+          gi === 0 ? '上回りました' : gi === split.length - 1 ? '下回りました' : '中位でした'
+        // 中位の集団は「上回った」とも「下回った」とも言えないので値だけを述べる。
+        // そのときも文として終わらせる（値で切ると読み手が途中だと思う）。
+        const tail = `${METRIC_LABEL[c]} ${formatMetric(c, g.value)} で${verb}`
+        // 「いたのため」「だったのため」にならないよう、活用形はここで閉じる。
+        const reason = `${recordText(full)}。${tiedLabel(tied.length)}ため${scopeLabel}、${tail}`
         out.push(fixed(s, cursor, overall, reason))
       } else {
         out.push(
@@ -494,7 +542,11 @@ function resolve(
   return unresolved(ctx, tied, startRank, overall, rng, drawUsed)
 }
 
-/** 同率だった人数の言い方。「1者と並んだため」は日本語として不自然。 */
+/**
+ * 同率だった人数の言い方。後ろに「ため」が続く形で返す。
+ *
+ * 「1者と並んだ」は日本語として不自然なので2者だけ別の言い方にする。
+ */
 function tiedLabel(n: number): string {
   return n === 2 ? '同率の相手がいた' : `${n}者が同率だった`
 }
@@ -535,8 +587,8 @@ function unresolved(
           const full = overall.get(s.entryId) ?? s
           const verb = gi === 0 ? '勝っていた' : gi === split.length - 1 ? '負けていた' : 'でした'
           const reason =
-            `${recordText(full)}。${tiedLabel(tied.length)}が全基準で並んだため、` +
-            `当事者同士の対戦で比べ、${g.value}勝で${verb}ため この順位です`
+            `${recordText(full)}。すべての基準で並んだため、` +
+            `当事者同士の対戦で比べ、${g.value}勝で${verb}ためこの順位です`
           out.push(fixed(s, cursor, overall, reason))
         } else {
           out.push(

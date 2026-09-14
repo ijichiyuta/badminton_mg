@@ -228,6 +228,7 @@ function OperatorApp() {
         )}
         {tab === 'print' && (
           <PrintScreen
+            getStandings={app.getStandings}
             tournament={t}
             groups={app.data.groups}
             matches={matches}

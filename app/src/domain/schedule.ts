@@ -237,6 +237,12 @@ export function assignReferees(
     return matches.map((m) => ({ matchNumber: m.number, fromMatchNumber: null, note: '' }))
   }
 
+  // **時刻を持たない試合は割当の対象にしない。**
+  // トーナメントは1回戦が終わるまで相手が決まらないので時間割を持たない。
+  // 混ざったまま並べ替えると、空文字を時刻として解釈しようとして落ちる。
+  matches = matches.filter((m) => m.scheduledAt !== '' && m.scheduledAt != null)
+  if (matches.length === 0) return []
+
   // 枠（時刻）ごとに並べ直す。段数は枠の並びで数える。
   const times = [...new Set(matches.map((m) => m.scheduledAt))].sort(
     (a, b) => parseTime(a) - parseTime(b),

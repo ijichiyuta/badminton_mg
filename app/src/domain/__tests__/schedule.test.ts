@@ -317,3 +317,44 @@ describe('境界', () => {
     expect(() => buildSchedule([block('a', 'A組', 4)], { ...OPTS, startTime: '9時半' })).toThrow()
   })
 })
+
+describe('時間割を持たない試合が混ざったとき', () => {
+  const scheduled = {
+    blockId: 'g1',
+    blockLabel: 'A組',
+    numberInGroup: 1,
+    number: 1,
+    entryIds: ['a', 'b'] as [string, string],
+    slotPair: [1, 2] as [number, number],
+    round: 1,
+    court: 1,
+    scheduledAt: '9:30',
+    scoringRuleId: null,
+  }
+
+  it('**時刻のない試合で落ちない。**トーナメントは時間割を持たない', () => {
+    const noTime = { ...scheduled, number: 2, scheduledAt: '' }
+    expect(() =>
+      assignReferees([scheduled, noTime], { style: 'LOSER', firstMatchRefereeRow: 3, courtCount: 2 }),
+    ).not.toThrow()
+  })
+
+  it('時刻のない試合は割当の対象から外れる', () => {
+    const noTime = { ...scheduled, number: 2, scheduledAt: '' }
+    const r = assignReferees([scheduled, noTime], {
+      style: 'LOSER',
+      firstMatchRefereeRow: 3,
+      courtCount: 2,
+    })
+    expect(r.map((x) => x.matchNumber)).not.toContain(2)
+  })
+
+  it('全部が時刻なしなら空を返す', () => {
+    const r = assignReferees([{ ...scheduled, scheduledAt: '' }], {
+      style: 'LOSER',
+      firstMatchRefereeRow: 3,
+      courtCount: 2,
+    })
+    expect(r).toEqual([])
+  })
+})
